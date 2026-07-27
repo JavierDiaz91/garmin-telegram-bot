@@ -133,60 +133,54 @@ async def obtener_carga_trabajo():
 
 async def obtener_entrenamiento_hoy():
     today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
-    events, err = await fetch_intervals_data("events", {"oldest": today_str, "newest": today_str})
+    
+    # 1. Buscamos primero en las ACTIVIDADES REALIZADAS (subidas desde el reloj)
+    actividades, err = await fetch_intervals_data("activities", {"oldest": today_str, "newest": today_str})
 
-    if err or not events:
-        return f"📅 Fecha: `{today_str}`\n\n🏃 No hay planes ni actividades registradas hoy."
-
-    actividades = [e for e in events if e.get("moving_time") or e.get("distance")]
-
-    if actividades:
+    if actividades and len(actividades) > 0:
         act = actividades[0]
         nombre = act.get("name", "Entrenamiento")
         distancia = round(act.get("distance", 0) / 1000, 2)
         
-        icu_training_load = act.get("icu_training_load")
-        load_str = round(icu_training_load, 1) if isinstance(icu_training_load, (int, float)) else "N/D"
-        
-        rpe = act.get("perceived_exertion", "N/D")
-        feeling = act.get("feeling", "N/D")
-        decoupling = act.get("decoupling")
+        icu_load = act.get("icu_training_load")
+        load_str = round(icu_load, 1) if isinstance(icu_load, (int, float)) else "N/D"
         
         fc_avg = act.get("average_heartrate", "N/D")
         fc_max = act.get("max_heartrate", "N/D")
-
+        rpe = act.get("perceived_exertion", "N/D")
+        decoupling = act.get("decoupling")
         decoupling_str = f"{round(decoupling, 1)}%" if isinstance(decoupling, (int, float)) else "N/D"
 
         return (
-            f"🏃 *SESIÓN COMPLETADA: {nombre.upper()}*\n"
+            f"🏃 *SESIÓN COMPLETADA HOY: {nombre.upper()}*\n"
             f"📅 Fecha: `{today_str}`\n\n"
             f"📏 *MÉTRICAS Y CARGA*\n"
             f"• *Distancia:* {distancia} km\n"
-            f"• *Carga / TSS (Training Stress Score):* {load_str}\n"
-            f"  └ _Estrés fisiológico provocado por la combinación de volumen e intensidad._\n"
+            f"• *Carga / TSS:* {load_str}\n"
             f"• *FC Media / Máx:* {fc_avg} / {fc_max} ppm\n\n"
             f"🧠 *SUBJETIVO Y DESACOPLE*\n"
-            f"• *RPE (Rate of Perceived Exertion):* {rpe}/10\n"
-            f"  └ _Escala subjetiva de esfuerzo percibido (1 = muy suave, 10 = esfuerzo máximo)._\n"
-            f"• *Sensación / Feeling:* {feeling}/5\n"
-            f"  └ _Percepción subjetiva de cómo se sintió el cuerpo durante la sesión._\n"
-            f"• *Desacople Aeróbico:* {decoupling_str}\n"
-            f"  └ _Deriva cardíaca respecto al ritmo/potencia. Un valor < 5% indica buena eficiencia aeróbica._"
+            f"• *RPE:* {rpe}/10\n"
+            f"• *Desacople Aeróbico:* {decoupling_str}"
         )
 
-    workout = events[0]
-    nombre = workout.get("name", "Planificado")
-    descripcion = workout.get("description", "Sin descripción detallada.")
-    distancia_plan = round(workout.get("distance", 0) / 1000, 2)
+    # 2. Si no hay actividad completada, buscamos si había algo PLANIFICADO en 'events'
+    events, err_ev = await fetch_intervals_data("events", {"oldest": today_str, "newest": today_str})
+    if events and len(events) > 0:
+        workout = events[0]
+        nombre = workout.get("name", "Planificado")
+        descripcion = workout.get("description", "Sin detalles.")
+        distancia_plan = round(workout.get("distance", 0) / 1000, 2)
 
-    return (
-        f"📋 *ENTRENAMIENTO PLANIFICADO HOY*\n"
-        f"📅 Fecha: `{today_str}`\n\n"
-        f"📌 *Sesión:* {nombre}\n"
-        f"📏 *Distancia prevista:* {distancia_plan if distancia_plan > 0 else 'N/D'} km\n\n"
-        f"📝 *Detalles:* {descripcion}\n\n"
-        f"⚠️ _Aún no se ha detectado el archivo de entrenamiento completado._"
-    )
+        return (
+            f"📋 *ENTRENAMIENTO PLANIFICADO HOY*\n"
+            f"📅 Fecha: `{today_str}`\n\n"
+            f"📌 *Sesión:* {nombre}\n"
+            f"📏 *Distancia prevista:* {distancia_plan if distancia_plan > 0 else 'N/D'} km\n\n"
+            f"📝 *Detalles:* {descripcion}\n\n"
+            f"⚠️ _Aún no se ha detectado el archivo de entrenamiento completado._"
+        )
+
+    return f"📅 Fecha: `{today_str}`\n\n🏃 No hay planes ni actividades registradas hoy."
 
 async def obtener_diagnostico_completo():
     salud = await obtener_salud_sueno()
