@@ -292,12 +292,13 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Usar el identificador con 'models/' explícito
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
         response = model.generate_content(prompt_completo)
 
         respuesta_ai = response.text
 
-        # Enviamos la respuesta formateada o texto plano si falla Markdown por símbolos especiales
+        # Enviamos la respuesta
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
