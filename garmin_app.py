@@ -2,71 +2,118 @@ import os
 import logging
 import threading
 from flask import Flask
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    MessageHandler,
+    filters
+)
 
-# ==========================================
-# 1. SILENCIAR LOGS SENSIBLES (HTTPX)
-# ==========================================
-# Evita que httpx imprima las URLs completas con el Token de Telegram en Render
+# ----------------------------------------------------------------------
+# 1. SEGURIDAD Y LOGS (Oculta tokens en logs)
+# ----------------------------------------------------------------------
 logging.getLogger("httpx").setLevel(logging.WARNING)
-
-# Configuración básica del logging para ver mensajes útiles del bot
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# ==========================================
-# 2. SERVIDOR WEB PARA HEALTH CHECK (RENDER FREE)
-# ==========================================
-# Flask responderá a las peticiones de Render para evitar el error 'No open ports detected'
+# ----------------------------------------------------------------------
+# 2. VARIABLES DE ENTORNO
+# ----------------------------------------------------------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
+ATHLETE_ID = os.getenv("ATHLETE_ID")
+CHAT_ID = os.getenv("CHAT_ID")
+
+# ----------------------------------------------------------------------
+# 3. SALUD DEL SERVICIO WEB (Flask)
+# ----------------------------------------------------------------------
 server = Flask(__name__)
 
 @server.route('/')
 def health_check():
-    return "Bot de Telegram activo y corriendo correctamente.", 200
+    return "Bot de Garmin/Intervals activo.", 200
 
 def run_web_server():
-    # Render asigna automáticamente un puerto mediante la variable de entorno PORT
     port = int(os.environ.get("PORT", 8080))
     server.run(host="0.0.0.0", port=port)
 
-# ==========================================
-# 3. HANDLERS Y LÓGICA DE TU BOT DE TELEGRAM
-# ==========================================
+# ----------------------------------------------------------------------
+# 4. MENÚ DE BOTONES Y HANDLERS DEL BOT
+# ----------------------------------------------------------------------
+def main_menu_keyboard():
+    """Genera el teclado con los botones principales"""
+    keyboard = [
+        [
+            InlineKeyboardButton("📊 Último Entreno", callback_data="ultimo_entreno"),
+            InlineKeyboardButton("📈 Resumen Semanal", callback_data="resumen_semanal")
+        ],
+        [
+            InlineKeyboardButton("🏃 Analizar Ratios", callback_data="analizar_ratios"),
+            InlineKeyboardButton("⚙️ Estado API", callback_data="estado_api")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Respuesta al comando /start"""
-    await update.message.reply_text("¡Hola! Tu bot de Garmin está activo y funcionando en Render.")
+    """Comando /start con menú desplegable"""
+    texto = (
+        "¡Hola! 👋 BIenvenido a **Javi-Analisis-Entreno**.\n\n"
+        "Selecciona una opción del menú para consultar tus métricas de entrenamiento:"
+    )
+    await update.message.reply_text(
+        texto,
+        parse_mode="Markdown",
+        reply_markup=main_menu_keyboard()
+    )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Respuesta al comando /help"""
-    await update.message.reply_text("Usa los comandos configurados para interactuar con tus datos de Garmin.")
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja los clics en los botones inline"""
+    query = update.callback_query
+    await query.answer()
 
-# Aquí puedes agregar tus funciones adicionales (entrenamientos, llamadas a la API de Intervals, etc.)
+    if query.data == "ultimo_entreno":
+        # Aquí conectas tu función que consulta el último entrenamiento de Intervals
+        await query.edit_message_text(
+            "🔎 *Obteniendo datos del último entrenamiento...*\n\n"
+            "(Aquí se procesan los datos recuperados con tu API Key)",
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard()
+        )
+    elif query.data == "resumen_semanal":
+        await query.edit_message_text(
+            "📈 *Resumen Semanal:*\n\nPróximamente métricas acumuladas.",
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard()
+        )
+    elif query.data == "estado_api":
+        estado = "✅ Configurada" if INTERVALS_API_KEY else "❌ No configurada"
+        await query.edit_message_text(
+            f"⚙️ **Estado del Bot:**\n• API Key Intervals: {estado}\n• ID Atleta: {ATHLETE_ID or 'No configurado'}",
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard()
+        )
 
-# ==========================================
-# 4. PUNTO DE ENTRADA PRINCIPAL
-# ==========================================
+# ----------------------------------------------------------------------
+# 5. INICIALIZACIÓN Y EJECUCIÓN
+# ----------------------------------------------------------------------
 if __name__ == "__main__":
-    # Obtener el Token de Telegram desde las Variables de Entorno de Render
-    BOT_TOKEN = os.environ.get("BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
-
     if not BOT_TOKEN:
-        raise ValueError("Error: No se encontró la variable de entorno BOT_TOKEN o TELEGRAM_BOT_TOKEN en Render.")
+        raise ValueError("Error: BOT_TOKEN no disponible en las variables de entorno.")
 
-    # A) Iniciar el servidor web de Flask en un hilo secundario (Background Thread)
-    flask_thread = threading.Thread(target=run_web_server, daemon=True)
-    flask_thread.start()
-    logging.info("Servidor Web iniciado para responder a los Health Checks de Render.")
+    # A) Iniciar Flask en hilo secundario
+    threading.Thread(target=run_web_server, daemon=True).start()
 
-    # B) Configurar e iniciar el Bot de Telegram (Polling)
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    # B) Configurar Bot
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Registro de Handlers/Comandos
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
+    # Handlers
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    # Iniciar la escucha continua de mensajes
-    logging.info("Iniciando Polling del Bot de Telegram...")
-    application.run_polling()
+    logging.info("Bot de Telegram iniciado correctamente.")
+    app.run_polling()
