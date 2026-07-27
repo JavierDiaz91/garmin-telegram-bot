@@ -1,324 +1,72 @@
-import datetime
-import logging
 import os
-import requests
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
-from telegram.ext import (
-    ApplicationBuilder,
-    CallbackQueryHandler,
-    CommandHandler,
-    ContextTypes,
-)
+import logging
+import threading
+from flask import Flask
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Configuración de logs en consola
+# ==========================================
+# 1. SILENCIAR LOGS SENSIBLES (HTTPX)
+# ==========================================
+# Evita que httpx imprima las URLs completas con el Token de Telegram en Render
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# Configuración básica del logging para ver mensajes útiles del bot
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# 🔑 LECTURA SEGURA DE VARIABLES DE ENTORNO (Render)
-BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
-INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
-ATHLETE_ID = os.getenv("ATHLETE_ID")
-CHAT_ID = os.getenv("CHAT_ID")
+# ==========================================
+# 2. SERVIDOR WEB PARA HEALTH CHECK (RENDER FREE)
+# ==========================================
+# Flask responderá a las peticiones de Render para evitar el error 'No open ports detected'
+server = Flask(__name__)
 
-# --- MÓDULO DE CONSULTA A INTERVALS.ICU ---
+@server.route('/')
+def health_check():
+    return "Bot de Telegram activo y corriendo correctamente.", 200
 
-def obtener_datos_wellness(fecha_str):
-    url = f"https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/wellness/{fecha_str}"
-    response = requests.get(url, auth=('API_KEY', INTERVALS_API_KEY))
-    if response.status_code == 200:
-        return response.json()
-    return None
+def run_web_server():
+    # Render asigna automáticamente un puerto mediante la variable de entorno PORT
+    port = int(os.environ.get("PORT", 8080))
+    server.run(host="0.0.0.0", port=port)
 
-def obtener_entrenamiento_hoy():
-    today = datetime.date.today().isoformat()
-    url = f"https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/events?oldest={today}&newest={today}"
-    
-    response = requests.get(url, auth=('API_KEY', INTERVALS_API_KEY))
-    if response.status_code == 200:
-        eventos = response.json()
-        
-        entrenamientos = []
-        for e in eventos:
-            tipo = str(e.get("type", "")).lower()
-            categoria = str(e.get("category", "")).upper()
-            
-            if categoria == "WORKOUT" or tipo in ["workout", "ride", "run", "swim", "weighttraining", "note"] or e.get("icu_training_load"):
-                entrenamientos.append(e)
-                
-        return entrenamientos
-    return []
+# ==========================================
+# 3. HANDLERS Y LÓGICA DE TU BOT DE TELEGRAM
+# ==========================================
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Respuesta al comando /start"""
+    await update.message.reply_text("¡Hola! Tu bot de Garmin está activo y funcionando en Render.")
 
-def obtener_datos_procesados():
-    today = datetime.date.today()
-    date_str = today.strftime("%d/%m/%Y")
-    iso_date = today.isoformat()
-    
-    data = obtener_datos_wellness(iso_date)
-    
-    if not data or data.get("restingHR") is None:
-        yesterday_str = (today - datetime.timedelta(days=1)).isoformat()
-        data_ayer = obtener_datos_wellness(yesterday_str)
-        if data_ayer:
-            for k in ["restingHR", "hrv", "hrvSDNN", "bodyBattery", "sleepScore"]:
-                if data and data.get(k) is None and data_ayer.get(k) is not None:
-                    data[k] = data_ayer.get(k)
-            if not data:
-                data = data_ayer
-                date_str = (today - datetime.timedelta(days=1)).strftime("%d/%m/%Y")
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Respuesta al comando /help"""
+    await update.message.reply_text("Usa los comandos configurados para interactuar con tus datos de Garmin.")
 
-    if not data:
-        return None, date_str
+# Aquí puedes agregar tus funciones adicionales (entrenamientos, llamadas a la API de Intervals, etc.)
 
-    return data, date_str
+# ==========================================
+# 4. PUNTO DE ENTRADA PRINCIPAL
+# ==========================================
+if __name__ == "__main__":
+    # Obtener el Token de Telegram desde las Variables de Entorno de Render
+    BOT_TOKEN = os.environ.get("BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN")
 
-# --- GENERADORES DE VISTAS (REPORTES) ---
-
-def generar_reporte_completo():
-    data, date_str = obtener_datos_procesados()
-    if not data:
-        return "❌ <i>No se pudieron obtener datos desde Intervals.icu</i>"
-
-    rhr = data.get("restingHR")
-    body_battery = data.get("bodyBattery") or data.get("bb")
-    sleep_score = data.get("sleepScore") or data.get("sleepQuality")
-    hrv = data.get("hrv") or data.get("hrvSDNN")
-    
-    ctl = data.get("ctl")
-    atl = data.get("atl")
-    
-    ctl_fmt = f"{round(ctl, 1)}" if ctl is not None else "N/D"
-    atl_fmt = f"{round(atl, 1)}" if atl is not None else "N/D"
-    tsb_val = round(ctl - atl, 1) if (ctl is not None and atl is not None) else None
-    tsb_fmt = f"{tsb_val}" if tsb_val is not None else "N/D"
-
-    puntuacion = 100
-    alertas = []
-    
-    if rhr and rhr > 55:
-        alertas.append(f"• FC en Reposo elevada (<code>{rhr} bpm</code>)")
-        puntuacion -= 25
-        
-    if body_battery and body_battery < 60:
-        alertas.append(f"• Body Battery en nivel bajo (<code>{body_battery}%</code>)")
-        puntuacion -= 25
-        
-    if sleep_score and sleep_score < 70:
-        alertas.append(f"• Calidad de descanso insuficiente (<code>{sleep_score}/100</code>)")
-        puntuacion -= 20
-
-    if puntuacion >= 80:
-        badge_estado = "🟢 <b>ESTADO ÓPTIMO</b>"
-        recomendacion = "Sistema recuperado. Tienes luz verde para la sesión programada."
-    elif puntuacion >= 50:
-        badge_estado = "🟡 <b>FATIGA MODERADA</b>"
-        recomendacion = "Carga acumulada considerable. Se sugiere rodaje suave en Z2 o ajustar intensidad."
-    else:
-        badge_estado = "🔴 <b>ALERTA DE FATIGA</b>"
-        recomendacion = "Estrés fisiológico alto. Considera descanso activo, movilidad o sesión de recuperación."
-
-    rhr_str = f"<b>{rhr}</b> bpm" if rhr is not None else "<i>N/D</i>"
-    hrv_str = f"<b>{hrv}</b> ms" if hrv is not None else "<i>N/D</i>"
-    bb_str = f"<b>{body_battery}%</b>" if body_battery is not None else "<i>N/D</i>"
-    sleep_str = f"<b>{sleep_score}/100</b>" if sleep_score is not None else "<i>N/D</i>"
-
-    return f"""<b>📊 INFORME DE RENDIMIENTO MATUTINO</b>
-📅 <i>{date_str}</i>
-────────────────────────
-
-{badge_estado}
-💡 {recomendacion}
-
-<b>🫀 SALUD Y RECUPERACIÓN</b>
-• FC en Reposo:  {rhr_str}
-• Estado HRV:     {hrv_str}
-• Body Battery:   {bb_str}
-• Calidad Sueño:  {sleep_str}
-
-<b>📈 CARGA DE ENTRENAMIENTO</b>
-• Aptitud (CTL): <b>{ctl_fmt}</b>
-• Fatiga (ATL):   <b>{atl_fmt}</b>
-• Forma (TSB):    <b>{tsb_fmt}</b>
-
-<b>🔍 DIAGNÓSTICO FISIOLÓGICO</b>
-{chr(10).join(alertas) if alertas else "• Sin signos de estrés fisiológico detectados."}
-────────────────────────
-🤖 <i>Generado por GarminBot • Intervals.icu</i>"""
-
-def generar_vista_carga():
-    data, date_str = obtener_datos_procesados()
-    if not data:
-        return "❌ <i>No se pudieron obtener datos desde Intervals.icu</i>"
-
-    ctl = data.get("ctl")
-    atl = data.get("atl")
-    ctl_fmt = round(ctl, 1) if ctl is not None else "N/D"
-    atl_fmt = round(atl, 1) if atl is not None else "N/D"
-    tsb_val = round(ctl - atl, 1) if (ctl is not None and atl is not None) else "N/D"
-
-    return f"""<b>📈 RESUMEN DE CARGA Y FORMA FÍSICA</b>
-📅 <i>{date_str}</i>
-────────────────────────
-• <b>Fitness (CTL):</b> {ctl_fmt}  <i>(Aptitud a largo plazo)</i>
-• <b>Fatiga (ATL):</b> {atl_fmt}  <i>(Carga acumulada reciente)</i>
-• <b>Forma (TSB):</b> {tsb_val}  <i>(Balance de frescura)</i>
-
-💡 <i>Un TSB positivo indica frescura física; un TSB negativo refleja fatiga acumulada por entrenamientos.</i>
-────────────────────────"""
-
-def generar_vista_salud():
-    data, date_str = obtener_datos_procesados()
-    if not data:
-        return "❌ <i>No se pudieron obtener datos desde Intervals.icu</i>"
-
-    rhr = data.get("restingHR", "N/D")
-    hrv = data.get("hrv") or data.get("hrvSDNN", "N/D")
-    bb = data.get("bodyBattery") or data.get("bb", "N/D")
-    sleep = data.get("sleepScore") or data.get("sleepQuality", "N/D")
-
-    return f"""<b>🫀 MÉTRICAS DE SALUD Y RECUPERACIÓN</b>
-📅 <i>{date_str}</i>
-────────────────────────
-• <b>FC en Reposo:</b> {rhr} bpm
-• <b>Variabilidad (HRV):</b> {hrv} ms
-• <b>Body Battery:</b> {bb}%
-• <b>Calidad de Sueño:</b> {sleep}/100
-────────────────────────"""
-
-def generar_vista_entrenamiento():
-    entrenamientos = obtener_entrenamiento_hoy()
-    date_str = datetime.date.today().strftime("%d/%m/%Y")
-
-    if not entrenamientos:
-        return f"""<b>🚴‍♂️ ENTRENAMIENTO PROGRAMADO</b>
-📅 <i>{date_str}</i>
-────────────────────────
-🛋️ <b>Día de Descanso / Sin sesión agendada</b>
-
-<i>No hay entrenamientos planificados en Intervals.icu para el día de hoy. ¡Aprovecha para recuperar!</i>
-────────────────────────"""
-
-    entreno = entrenamientos[0]
-    nombre = entreno.get("name", "Entrenamiento")
-    tipo = entreno.get("type", "Actividad")
-    
-    moving_time = entreno.get("moving_time") or entreno.get("elapsed_time")
-    duracion = f"{round(moving_time / 60)} min" if moving_time else "N/D"
-    load = entreno.get("icu_training_load", "N/D")
-    
-    descripcion = entreno.get("description", "").strip()
-    if len(descripcion) > 200:
-        descripcion = descripcion[:197] + "..."
-
-    return f"""<b>🚴‍♂️ ENTRENAMIENTO PROGRAMADO</b>
-📅 <i>{date_str}</i>
-────────────────────────
-🎯 <b>{nombre}</b>
-• <b>Disciplina:</b> {tipo}
-• <b>Duración estimada:</b> {duracion}
-• <b>Carga esperada (TSS):</b> {load}
-
-{f"📝 <b>Detalles:</b>{chr(10)}<i>{descripcion}</i>" if descripcion else ""}
-────────────────────────"""
-
-# --- INTERFAZ CON BOTONES (KEYBOARD) ---
-
-def obtener_teclado_principal():
-    keyboard = [
-        [InlineKeyboardButton("📊 Diagnóstico Completo", callback_data="btn_completo")],
-        [InlineKeyboardButton("🏃‍♂️ Entrenamiento Hoy", callback_data="btn_entreno")],
-        [
-            InlineKeyboardButton("📈 Carga (CTL/ATL)", callback_data="btn_carga"),
-            InlineKeyboardButton("🫀 Salud y Sueño", callback_data="btn_salud")
-        ],
-        [InlineKeyboardButton("🏠 Menú Principal", callback_data="btn_menu")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-# --- MANEJADORES DE TELEGRAM (HANDLERS) ---
-
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = (
-        "👋 <b>¡Hola Javier! Soy tu bot de rendimiento deportivo.</b>\n\n"
-        "Selecciona una opción del menú para consultar tus métricas o entrenamiento en Intervals.icu:"
-    )
-    await update.message.reply_text(
-        texto, 
-        reply_markup=obtener_teclado_principal(), 
-        parse_mode='HTML'
-    )
-
-async def hoy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mensaje_espera = await update.message.reply_text("🔎 <i>Consultando Intervals.icu...</i>", parse_mode='HTML')
-    reporte = generar_reporte_completo()
-    
-    await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=mensaje_espera.message_id)
-    await update.message.reply_text(
-        reporte, 
-        reply_markup=obtener_teclado_principal(), 
-        parse_mode='HTML'
-    )
-
-async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    
-    if query.data in ["btn_completo", "btn_hoy"]:
-        nuevo_texto = generar_reporte_completo()
-    elif query.data == "btn_entreno":
-        nuevo_texto = generar_vista_entrenamiento()
-    elif query.data == "btn_carga":
-        nuevo_texto = generar_vista_carga()
-    elif query.data == "btn_salud":
-        nuevo_texto = generar_vista_salud()
-    elif query.data == "btn_menu":
-        nuevo_texto = (
-            "👋 <b>¡Hola Javier! Soy tu bot de rendimiento deportivo.</b>\n\n"
-            "Selecciona una opción del menú para consultar tus métricas o entrenamiento en Intervals.icu:"
-        )
-    else:
-        nuevo_texto = generar_reporte_completo()
-
-    try:
-        await query.answer()
-        await query.edit_message_text(
-            text=nuevo_texto, 
-            reply_markup=obtener_teclado_principal(), 
-            parse_mode='HTML'
-        )
-    except BadRequest as e:
-        if "Message is not modified" in str(e):
-            await query.answer(text="ℹ️ Las métricas ya están actualizadas.", show_alert=False)
-        else:
-            raise e
-
-async def enviar_reporte_programado(context: ContextTypes.DEFAULT_TYPE):
-    reporte = generar_reporte_completo()
-    await context.bot.send_message(
-        chat_id=CHAT_ID, 
-        text=reporte, 
-        reply_markup=obtener_teclado_principal(), 
-        parse_mode='HTML'
-    )
-
-# --- EJECUCIÓN PRINCIPAL ---
-
-if __name__ == '__main__':
     if not BOT_TOKEN:
-        raise ValueError("Error: BOT_TOKEN o TELEGRAM_BOT_TOKEN no está definido en las variables de entorno.")
+        raise ValueError("Error: No se encontró la variable de entorno BOT_TOKEN o TELEGRAM_BOT_TOKEN en Render.")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # A) Iniciar el servidor web de Flask en un hilo secundario (Background Thread)
+    flask_thread = threading.Thread(target=run_web_server, daemon=True)
+    flask_thread.start()
+    logging.info("Servidor Web iniciado para responder a los Health Checks de Render.")
 
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("hoy", hoy_cmd))
-    app.add_handler(CommandHandler("ayuda", start_cmd))
-    app.add_handler(CallbackQueryHandler(manejar_botones))
+    # B) Configurar e iniciar el Bot de Telegram (Polling)
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    job_queue = app.job_queue
-    if job_queue:
-        job_queue.run_daily(enviar_reporte_programado, time=datetime.time(hour=7, minute=0, second=0))
-        job_queue.run_daily(enviar_reporte_programado, time=datetime.time(hour=20, minute=0, second=0))
+    # Registro de Handlers/Comandos
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
 
-    print("🤖 Bot interactivo activo y escuchando mensajes...")
-    app.run_polling()
+    # Iniciar la escucha continua de mensajes
+    logging.info("Iniciando Polling del Bot de Telegram...")
+    application.run_polling()
