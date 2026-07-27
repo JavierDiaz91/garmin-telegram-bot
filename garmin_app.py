@@ -10,8 +10,11 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes
+    MessageHandler,
+    ContextTypes,
+    filters
 )
+from google import genai
 
 # ----------------------------------------------------------------------
 # 1. LOGS Y CONFIGURACIÓN
@@ -25,8 +28,12 @@ logging.basicConfig(
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
 ATHLETE_ID = os.getenv("ATHLETE_ID")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
+
+# Inicializar cliente de Gemini si la API KEY está configurada
+ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 # ----------------------------------------------------------------------
 # 2. WEBSERVER FLASK (Render Healthcheck)
@@ -47,7 +54,7 @@ def run_web_server():
 async def fetch_intervals_data(endpoint: str, params: dict = None):
     """Realiza peticiones asíncronas HTTP a la API de Intervals.icu"""
     if not INTERVALS_API_KEY or not ATHLETE_ID:
-        return None, "⚠️ *Error:* Faltan configurar `INTERVALS_API_KEY` o `ATHLETE_ID` en las variables de entorno."
+        return None, "⚠️ *Error:* Faltan configurar `INTERVALS_API_KEY` o `ATHLETE_ID`."
 
     url = f"https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/{endpoint}"
     auth = ('API_KEY', INTERVALS_API_KEY)
@@ -63,7 +70,7 @@ async def fetch_intervals_data(endpoint: str, params: dict = None):
         return None, "⚠️ Error de conexión con Intervals.icu."
 
 # ----------------------------------------------------------------------
-# 4. FUNCIONES MODULARES CON DESCRIPCIONES DE SIGLAS
+# 4. FUNCIONES MODULARES DE CONSULTA
 # ----------------------------------------------------------------------
 
 async def obtener_salud_sueno():
@@ -204,8 +211,9 @@ def main_menu_keyboard():
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "👋 **¡Hola Javier! Soy tu bot de rendimiento deportivo.**\n\n"
-        "Selecciona una opción del menú para consultar tus métricas:"
+        "👋 **¡Hola Javier! Soy tu bot y coach de rendimiento deportivo.**\n\n"
+        "• Usá la **botonera** para consultar tus métricas en vivo.\n"
+        "• O **escribime cualquier pregunta en texto** (ej: *'¿Cómo me conviene afrontar el entreno de hoy con mi fatiga actual?'*) y la analizaré con AI junto a tus datos."
     )
     await update.message.reply_text(
         texto,
@@ -242,7 +250,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu_principal":
         texto = (
             "👋 **¡Hola Javier! Soy tu bot de rendimiento deportivo.**\n\n"
-            "Selecciona una opción del menú para consultar tus métricas:"
+            "Selecciona una opción del menú o escribime una consulta:"
         )
         await query.edit_message_text(
             texto,
@@ -251,7 +259,56 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # ----------------------------------------------------------------------
-# 6. ARRANQUE DEL BOT
+# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
+# ----------------------------------------------------------------------
+async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_prompt = update.message.text
+
+    if not ai_client:
+        await update.message.reply_text("⚠️ *La integración con AI no está configurada.* Falta la variable `GEMINI_API_KEY`.")
+        return
+
+    # Mensaje de espera
+    thinking_msg = await update.message.reply_text("🧠 *Analizando tus datos fisiológicos con AI...*", parse_mode="Markdown")
+
+    try:
+        # Obtenemos el contexto actual de la fisiología del usuario
+        contexto_fisiologico = await obtener_diagnostico_completo()
+
+        system_instruction = (
+            "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional. "
+            "Tu atleta te realiza una consulta. Analizá su consulta junto a sus datos fisiológicos y de entrenamiento actuales. "
+            "Dales recomendaciones prácticas basadas en ciencia del deporte (fisiología, balance de carga, variabilidad cardíaca y recuperación)."
+        )
+
+        prompt_completo = (
+            f"DATOS FISIOLÓGICOS Y DE ENTRENAMIENTO DEL ATLETA (HOY):\n"
+            f"---------------------------------------------------\n"
+            f"{contexto_fisiologico}\n"
+            f"---------------------------------------------------\n\n"
+            f"CONSULTA DEL ATLETA: \"{user_prompt}\""
+        )
+
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt_completo,
+            config={
+                'system_instruction': system_instruction,
+                'temperature': 0.3
+            }
+        )
+
+        respuesta_ai = response.text
+
+        # Reemplazar el mensaje de espera con la respuesta
+        await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+    except Exception as e:
+        logging.error(f"Error generando respuesta AI: {e}")
+        await thinking_msg.edit_text("❌ Ocurrió un error al procesar tu consulta con la AI.", reply_markup=main_menu_keyboard())
+
+# ----------------------------------------------------------------------
+# 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
     if not BOT_TOKEN:
@@ -260,8 +317,13 @@ if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    # Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Handler para cualquier mensaje de texto libre (no comando)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_text))
 
-    logging.info("Bot en ejecución...")
+    logging.info("Bot con IA en ejecución...")
     app.run_polling()
