@@ -265,21 +265,25 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
     if not ai_client:
-        await update.message.reply_text("⚠️ *La integración con AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.")
+        await update.message.reply_text(
+            "⚠️ *La integración con AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.",
+            parse_mode="Markdown"
+        )
         return
 
-    thinking_msg = await update.message.reply_text("🧠 *Analizando tus datos fisiológicos con AI...*", parse_mode="Markdown")
+    thinking_msg = await update.message.reply_text(
+        "🧠 *Analizando tus datos fisiológicos con AI...*", 
+        parse_mode="Markdown"
+    )
 
     try:
+        # Obtenemos el contexto actual de la fisiología
         contexto_fisiologico = await obtener_diagnostico_completo()
 
-        system_instruction = (
-            "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional. "
-            "Tu atleta te realiza una consulta. Analizá su consulta junto a sus datos fisiológicos y de entrenamiento actuales. "
-            "Dales recomendaciones prácticas basadas en ciencia del deporte (fisiología, balance de carga, variabilidad cardíaca y recuperación)."
-        )
-
         prompt_completo = (
+            "Eres un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional.\n"
+            "Analiza la consulta del atleta junto a sus datos fisiológicos y de entrenamiento actuales. "
+            "Ofrece recomendaciones prácticas basadas en ciencia del deporte.\n\n"
             f"DATOS FISIOLÓGICOS Y DE ENTRENAMIENTO DEL ATLETA (HOY):\n"
             f"---------------------------------------------------\n"
             f"{contexto_fisiologico}\n"
@@ -287,18 +291,15 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
+        # Generación directa
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=prompt_completo,
-            config={
-                'system_instruction': system_instruction,
-                'temperature': 0.3
-            }
+            contents=prompt_completo
         )
 
         respuesta_ai = response.text
 
-        # Si falla el parseo de Markdown por símbolos especiales, envía en texto plano
+        # Intentamos responder formateado o en texto plano
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
@@ -306,7 +307,11 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logging.error(f"Error generando respuesta AI: {e}")
-        await thinking_msg.edit_text("❌ Ocurrió un error al procesar tu consulta con la AI.", reply_markup=main_menu_keyboard())
+        await thinking_msg.edit_text(
+            f"❌ Error al consultar la AI: `{e}`", 
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard()
+        )
 # ----------------------------------------------------------------------
 # 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
