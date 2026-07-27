@@ -211,7 +211,7 @@ def main_menu_keyboard():
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "👋 **¡Hola Javier! Soy tu bot y coach de rendimiento deportivo.**\n\n"
+        "👋 **¡Hola Javi! Soy tu bot y rendimiento deportivo.**\n\n"
         "• Usá la **botonera** para consultar tus métricas en vivo.\n"
         "• O **escribime cualquier pregunta en texto** (ej: *'¿Cómo me conviene afrontar el entreno de hoy con mi fatiga actual?'*) y la analizaré con AI junto a tus datos."
     )
@@ -291,15 +291,15 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Generación directa
+        # Usamos gemini-1.5-flash
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash',
             contents=prompt_completo
         )
 
         respuesta_ai = response.text
 
-        # Intentamos responder formateado o en texto plano
+        # Enviamos la respuesta formateada o texto plano si falla Markdown
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
