@@ -63,7 +63,7 @@ async def fetch_intervals_data(endpoint: str, params: dict = None):
         return None, "⚠️ Error de conexión con Intervals.icu."
 
 # ----------------------------------------------------------------------
-# 4. FUNCIONES MODULARES DE CONSULTA
+# 4. FUNCIONES MODULARES CON DESCRIPCIONES DE SIGLAS
 # ----------------------------------------------------------------------
 
 async def obtener_salud_sueno():
@@ -85,10 +85,13 @@ async def obtener_salud_sueno():
         f"🫀 *SALUD, VFC Y DESCANSO*\n"
         f"📅 Fecha: `{today_str}`\n\n"
         f"• *VFC / HRV:* {hrv_str}\n"
+        f"  └ _Variabilidad de Frecuencia Cardíaca (RMSSD). Mayor valor = mejor recuperación del sistema nervioso parasimpático._\n\n"
         f"• *FC Reposo:* {rhr} ppm\n"
+        f"  └ _Frecuencia cardíaca en reposo. Un incremento anormal puede indicar fatiga o infección._\n\n"
         f"• *Sueño:* {sleep_hours} hs\n"
-        f"• *Readiness / Disposición:* {readiness}\n\n"
-        f"💡 _La Variabilidad de Frecuencia Cardíaca (HRV) refleja la recuperación del sistema nervioso parasimpático._"
+        f"  └ _Tiempo total de descanso nocturno._\n\n"
+        f"• *Readiness / Disposición:* {readiness}\n"
+        f"  └ _Puntuación de preparación para asimilar carga de entrenamiento._"
     )
 
 async def obtener_carga_trabajo():
@@ -106,12 +109,18 @@ async def obtener_carga_trabajo():
     tsb = round(ctl - atl, 1) if isinstance(ctl, (int, float)) and isinstance(atl, (int, float)) else "N/D"
 
     return (
-        f"📈 *MÉTRICAS DE CARGA Y FORMA (IMPULSE-RESPONSE)*\n"
+        f"📈 *MÉTRICAS DE CARGA Y FORMA (MODELO IMPULSO-RESPUESTA)*\n"
         f"📅 Fecha: `{today_str}`\n\n"
-        f"• *CTL (Fitness / Carga a Largo Plazo):* {ctl}\n"
-        f"• *ATL (Fatiga / Carga a Corto Plazo):* {atl}\n"
-        f"• *TSB (Forma / Frescura):* {tsb}\n\n"
-        f"💡 _Un TSB positivo indica frescura/recuperación; valores negativos (-10 a -30) indican la zona óptima de carga._"
+        f"• *CTL (Chronic Training Load / Fitness):* {ctl}\n"
+        f"  └ _Carga histórica acumulada (últimos 42 días). Refleja tu nivel de condición física base._\n\n"
+        f"• *ATL (Acute Training Load / Fatiga):* {atl}\n"
+        f"  └ _Carga reciente (últimos 7 días). Refleja el cansancio acumulado a corto plazo._\n\n"
+        f"• *TSB (Training Stress Balance / Forma):* {tsb}\n"
+        f"  └ _Resultado de CTL - ATL. Indica tu nivel de frescura o preparación actual._\n\n"
+        f"💡 *Guía rápida de TSB:*\n"
+        f"• `> +10`: Frescura / Transición o Pacing de competición.\n"
+        f"• `-10 a -30`: Zona óptima de estimulación y sobrecarga progresiva.\n"
+        f"• `< -30`: Riesgo elevado de sobreentrenamiento / lesión."
     )
 
 async def obtener_entrenamiento_hoy():
@@ -145,12 +154,16 @@ async def obtener_entrenamiento_hoy():
             f"📅 Fecha: `{today_str}`\n\n"
             f"📏 *MÉTRICAS Y CARGA*\n"
             f"• *Distancia:* {distancia} km\n"
-            f"• *Carga (TSS/Load):* {load_str}\n"
+            f"• *Carga / TSS (Training Stress Score):* {load_str}\n"
+            f"  └ _Estrés fisiológico provocado por la combinación de volumen e intensidad._\n"
             f"• *FC Media / Máx:* {fc_avg} / {fc_max} ppm\n\n"
             f"🧠 *SUBJETIVO Y DESACOPLE*\n"
-            f"• *Esfuerzo (RPE):* {rpe}/10\n"
-            f"• *Sensación:* {feeling}/5\n"
-            f"• *Desacople Aeróbico:* {decoupling_str}"
+            f"• *RPE (Rate of Perceived Exertion):* {rpe}/10\n"
+            f"  └ _Escala subjetiva de esfuerzo percibido (1 = muy suave, 10 = esfuerzo máximo)._\n"
+            f"• *Sensación / Feeling:* {feeling}/5\n"
+            f"  └ _Percepción subjetiva de cómo se sintió el cuerpo durante la sesión._\n"
+            f"• *Desacople Aeróbico:* {decoupling_str}\n"
+            f"  └ _Deriva cardíaca respecto al ritmo/potencia. Un valor < 5% indica buena eficiencia aeróbica._"
         )
 
     workout = events[0]
