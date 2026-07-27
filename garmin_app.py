@@ -5,6 +5,7 @@ import logging
 import threading
 import httpx
 from flask import Flask
+import google.generativeai as genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,7 +15,6 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-from google import genai
 
 # ----------------------------------------------------------------------
 # 1. LOGS Y CONFIGURACIÓN
@@ -32,8 +32,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
 
-# Inicializar cliente de Gemini si la API KEY está configurada
-ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+# Inicializar configuración de Gemini SDK
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # ----------------------------------------------------------------------
 # 2. WEBSERVER FLASK (Render Healthcheck)
@@ -211,7 +212,7 @@ def main_menu_keyboard():
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "👋 **¡Hola Javi! Soy tu bot y rendimiento deportivo.**\n\n"
+        "👋 **¡Hola Javi! Soy tu bot de rendimiento deportivo.**\n\n"
         "• Usá la **botonera** para consultar tus métricas en vivo.\n"
         "• O **escribime cualquier pregunta en texto** (ej: *'¿Cómo me conviene afrontar el entreno de hoy con mi fatiga actual?'*) y la analizaré con AI junto a tus datos."
     )
@@ -264,7 +265,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
-    if not ai_client:
+    if not GEMINI_API_KEY:
         await update.message.reply_text(
             "⚠️ *La integración con AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.",
             parse_mode="Markdown"
@@ -291,15 +292,12 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Usamos gemini-1.5-flash
-        response = ai_client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=prompt_completo
-        )
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt_completo)
 
         respuesta_ai = response.text
 
-        # Enviamos la respuesta formateada o texto plano si falla Markdown
+        # Enviamos la respuesta formateada o texto plano si falla Markdown por símbolos especiales
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
@@ -312,6 +310,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=main_menu_keyboard()
         )
+
 # ----------------------------------------------------------------------
 # 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
