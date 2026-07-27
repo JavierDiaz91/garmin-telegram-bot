@@ -1,16 +1,6 @@
-import os
-
-# Lee directamente las variables configuradas en Render (o usa el fallback si no existen)
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8539578864:AAFtzSbUv9FMUTw8luPGsxTGQp-kXhioXUs")
-INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY", "1l4xa2od589fm5giiqpmtdvf7")
-ATHLETE_ID = os.getenv("ATHLETE_ID", "i654156")
-CHAT_ID = os.getenv("CHAT_ID", "1065288817")
-
-
-
-
 import datetime
 import logging
+import os
 import requests
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
@@ -27,12 +17,11 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# 🔑 CONFIGURACIÓN Y CREDENCIALES
-INTERVALS_API_KEY = "1l4xa2od589fm5giiqpmtdvf7"
-ATHLETE_ID = "i654156"
-
-BOT_TOKEN = "8539578864:AAFtzSbUv9FMUTw8luPGsxTGQp-kXhioXUs"
-CHAT_ID = "1065288817"
+# 🔑 LECTURA SEGURA DE VARIABLES DE ENTORNO (Render)
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
+ATHLETE_ID = os.getenv("ATHLETE_ID")
+CHAT_ID = os.getenv("CHAT_ID")
 
 # --- MÓDULO DE CONSULTA A INTERVALS.ICU ---
 
@@ -45,17 +34,14 @@ def obtener_datos_wellness(fecha_str):
 
 def obtener_entrenamiento_hoy():
     today = datetime.date.today().isoformat()
-    # Consultamos los eventos/workouts del día
     url = f"https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/events?oldest={today}&newest={today}"
     
     response = requests.get(url, auth=('API_KEY', INTERVALS_API_KEY))
     if response.status_code == 200:
         eventos = response.json()
         
-        # Filtramos excluyendo solo si es una nota vacía o feriado, dejando cualquier entreno o plan
         entrenamientos = []
         for e in eventos:
-            # Si tiene TSS/load, o si es de tipo Workout/Run/Ride/etc., lo tomamos
             tipo = str(e.get("type", "")).lower()
             categoria = str(e.get("category", "")).upper()
             
@@ -240,28 +226,20 @@ def generar_vista_entrenamiento():
 # --- INTERFAZ CON BOTONES (KEYBOARD) ---
 
 def obtener_teclado_principal():
-    """Crea la botonera interactiva"""
     keyboard = [
-        [
-            InlineKeyboardButton("📊 Diagnóstico Completo", callback_data="btn_completo")
-        ],
-        [
-            InlineKeyboardButton("🏃‍♂️ Entrenamiento Hoy", callback_data="btn_entreno")
-        ],
+        [InlineKeyboardButton("📊 Diagnóstico Completo", callback_data="btn_completo")],
+        [InlineKeyboardButton("🏃‍♂️ Entrenamiento Hoy", callback_data="btn_entreno")],
         [
             InlineKeyboardButton("📈 Carga (CTL/ATL)", callback_data="btn_carga"),
             InlineKeyboardButton("🫀 Salud y Sueño", callback_data="btn_salud")
         ],
-        [
-            InlineKeyboardButton("🏠 Menú Principal", callback_data="btn_menu")
-        ]
+        [InlineKeyboardButton("🏠 Menú Principal", callback_data="btn_menu")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 # --- MANEJADORES DE TELEGRAM (HANDLERS) ---
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /start"""
     texto = (
         "👋 <b>¡Hola Javier! Soy tu bot de rendimiento deportivo.</b>\n\n"
         "Selecciona una opción del menú para consultar tus métricas o entrenamiento en Intervals.icu:"
@@ -273,7 +251,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def hoy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /hoy"""
     mensaje_espera = await update.message.reply_text("🔎 <i>Consultando Intervals.icu...</i>", parse_mode='HTML')
     reporte = generar_reporte_completo()
     
@@ -285,7 +262,6 @@ async def hoy_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja los clics en los botones"""
     query = update.callback_query
     
     if query.data in ["btn_completo", "btn_hoy"]:
@@ -318,7 +294,6 @@ async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise e
 
 async def enviar_reporte_programado(context: ContextTypes.DEFAULT_TYPE):
-    """Envío automático diario"""
     reporte = generar_reporte_completo()
     await context.bot.send_message(
         chat_id=CHAT_ID, 
@@ -330,15 +305,16 @@ async def enviar_reporte_programado(context: ContextTypes.DEFAULT_TYPE):
 # --- EJECUCIÓN PRINCIPAL ---
 
 if __name__ == '__main__':
+    if not BOT_TOKEN:
+        raise ValueError("Error: BOT_TOKEN o TELEGRAM_BOT_TOKEN no está definido en las variables de entorno.")
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Registro de handlers
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("hoy", hoy_cmd))
     app.add_handler(CommandHandler("ayuda", start_cmd))
     app.add_handler(CallbackQueryHandler(manejar_botones))
 
-    # Tareas programadas internas (07:00 hs y 20:00 hs)
     job_queue = app.job_queue
     if job_queue:
         job_queue.run_daily(enviar_reporte_programado, time=datetime.time(hour=7, minute=0, second=0))
