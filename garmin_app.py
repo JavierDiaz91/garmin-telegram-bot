@@ -265,14 +265,12 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
     if not ai_client:
-        await update.message.reply_text("⚠️ *La integración con AI no está configurada.* Falta la variable `GEMINI_API_KEY`.")
+        await update.message.reply_text("⚠️ *La integración con AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.")
         return
 
-    # Mensaje de espera
     thinking_msg = await update.message.reply_text("🧠 *Analizando tus datos fisiológicos con AI...*", parse_mode="Markdown")
 
     try:
-        # Obtenemos el contexto actual de la fisiología del usuario
         contexto_fisiologico = await obtener_diagnostico_completo()
 
         system_instruction = (
@@ -300,13 +298,15 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         respuesta_ai = response.text
 
-        # Reemplazar el mensaje de espera con la respuesta
-        await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        # Si falla el parseo de Markdown por símbolos especiales, envía en texto plano
+        try:
+            await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        except Exception:
+            await thinking_msg.edit_text(respuesta_ai, reply_markup=main_menu_keyboard())
 
     except Exception as e:
         logging.error(f"Error generando respuesta AI: {e}")
         await thinking_msg.edit_text("❌ Ocurrió un error al procesar tu consulta con la AI.", reply_markup=main_menu_keyboard())
-
 # ----------------------------------------------------------------------
 # 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
