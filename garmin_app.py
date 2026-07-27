@@ -1,3 +1,5 @@
+import datetime
+import zoneinfo
 import os
 import logging
 import threading
@@ -49,7 +51,10 @@ def obtener_entrenamiento_hoy():
     if not INTERVALS_API_KEY or not ATHLETE_ID:
         return "⚠️ *Error:* Faltan configurar `INTERVALS_API_KEY` o `ATHLETE_ID` en Render."
 
-    today_str = date.today().isoformat()
+    # Usar hora local de Argentina para evitar descalce por UTC en Render
+    tz_ar = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
+    today_str = datetime.datetime.now(tz_ar).strftime("%Y-%m-%d")
+
     url = f"https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/events?oldest={today_str}&newest={today_str}"
     
     try:
@@ -58,48 +63,61 @@ def obtener_entrenamiento_hoy():
             return f"❌ Error al consultar la API (Código {response.status_code})."
         
         eventos = response.json()
-        actividades = [e for e in eventos if e.get("type") in ["Run", "VirtualRun", "Ride", "Walk"] or e.get("moving_time")]
+        if not eventos:
+            return f"📅 *Fecha:* {today_str}\n\n🏃 No hay actividades ni planes para hoy en Intervals.icu."
 
-        if not actividades:
-            return f"📅 *Fecha:* {today_str}\n\n🏃 No hay actividades o entrenamientos registrados para hoy."
-
-        act = actividades[0]
-        nombre = act.get("name", "Entrenamiento")
-        distancia = round(act.get("distance", 0) / 1000, 2)
+        # Buscar si hay una actividad completada (tiene moving_time o distancia real)
+        actividades_realizadas = [e for e in eventos if e.get("moving_time") or e.get("distance")]
         
-        moving_time = act.get("moving_time", 0)
-        m, s = divmod(moving_time, 60)
-        h, m = divmod(m, 60)
-        tiempo_mov_str = f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+        if actividades_realizadas:
+            act = actividades_realizadas[0]
+            nombre = act.get("name", "Entrenamiento")
+            distancia = round(act.get("distance", 0) / 1000, 2)
+            
+            moving_time = act.get("moving_time", 0)
+            m, s = divmod(moving_time, 60)
+            h, m = divmod(m, 60)
+            tiempo_mov_str = f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
 
-        velocity = act.get("average_speed", 0)
-        ritmo_str = f"{int(1000/velocity)//60}:{int(1000/velocity)%60:02d}" if velocity > 0 else "N/A"
+            velocity = act.get("average_speed", 0)
+            ritmo_str = f"{int(1000/velocity)//60}:{int(1000/velocity)%60:02d}" if velocity > 0 else "N/A"
 
-        fc_avg = act.get("average_heartrate", "N/A")
-        fc_max = act.get("max_heartrate", "N/A")
-        cadence = act.get("average_cadence", "N/A")
-        if cadence != "N/A":
-            cadence = int(cadence * 2)
+            fc_avg = act.get("average_heartrate", "N/A")
+            fc_max = act.get("max_heartrate", "N/A")
+            cadence = act.get("average_cadence", "N/A")
+            if cadence != "N/A":
+                cadence = int(cadence * 2)
 
-        calorias = act.get("calories", "N/A")
-        desnivel_pos = act.get("total_elevation_gain", 0)
+            calorias = act.get("calories", "N/A")
+
+            return (
+                f"🏃 *SESIÓN COMPLETADA: {nombre.upper()}*\n"
+                f"📅 Fecha: {today_str}\n\n"
+                f"📏 *TIEMPOS Y RITMOS*\n"
+                f"• Distancia: *{distancia} km*\n"
+                f"• Tiempo en Movimiento: *{tiempo_mov_str} min*\n"
+                f"• Ritmo Medio: *{ritmo_str} /km*\n\n"
+                f"🫀 *MÉTRICAS CARDIACAS*\n"
+                f"• FC Media: *{fc_avg} ppm* | FC Máx: *{fc_max} ppm*\n"
+                f"• Cadencia Media: *{cadence} ppm*\n"
+                f"• Calorías: *{calorias} kcal*\n"
+            )
+
+        # Si no hay ejecutados, mostramos el planificado (TrainingPeaks / Intervals Workout)
+        workout = eventos[0]
+        nombre = workout.get("name", "Entrenamiento Planificado")
+        descripcion = workout.get("description", "Sin descripción detallada.")
+        distancia_plan = round(workout.get("distance", 0) / 1000, 2)
 
         return (
-            f"🏃 *RESUMEN DE SESIÓN: {nombre.upper()}*\n"
+            f"📋 *ENTRENAMIENTO PLANIFICADO PARA HOY*\n"
             f"📅 Fecha: {today_str}\n\n"
-            f"📏 *TIEMPOS Y RITMOS*\n"
-            f"• Distancia: *{distancia} km*\n"
-            f"• Tiempo en Movimiento: *{tiempo_mov_str} min*\n"
-            f"• Ritmo Medio en Movimiento: *{ritmo_str} /km*\n"
-            f"💡 _Ritmo real descartando pausas y detenciones._\n\n"
-            f"🫀 *MÉTRICAS CARDIACAS Y TÉCNICA*\n"
-            f"• FC Media: *{fc_avg} ppm* | FC Máx: *{fc_max} ppm*\n"
-            f"• Cadencia Media: *{cadence} ppm*\n"
-            f"💡 _Cadencias sobre 160 ppm ayudan a mitigar impacto articular._\n\n"
-            f"⛰️ *DESCANSO Y ESFUERZO*\n"
-            f"• Desnivel Positivo: *+{int(desnivel_pos)} m*\n"
-            f"• Calorías Consumidas: *{calorias} kcal*\n"
+            f"📌 *Sesión:* {nombre}\n"
+            f"📏 *Distancia prevista:* {distancia_plan if distancia_plan > 0 else '8.0'} km\n\n"
+            f"📝 *Detalles:* {descripcion}\n\n"
+            f"⚠️ _Aún no se ha detectado el archivo de reloj Garmin/FIT guardado para esta sesión._"
         )
+
     except Exception as e:
         logging.error(f"Error en entrenamiento_hoy: {e}")
         return "⚠️ Ocurrió un error al consultar el entrenamiento de hoy."
