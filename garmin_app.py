@@ -63,49 +63,63 @@ async def fetch_intervals_data(endpoint: str, params: dict = None):
         return None, "⚠️ Error de conexión con Intervals.icu."
 
 # ----------------------------------------------------------------------
-# 4. LÓGICA DE DIAGNÓSTICO INTEGRADO (PRE & POST WORKOUT)
+# 4. FUNCIONES MODULARES DE CONSULTA
 # ----------------------------------------------------------------------
-async def obtener_estado_fisiologico_completo():
+
+async def obtener_salud_sueno():
     today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
+    wellness, err = await fetch_intervals_data(f"wellness/{today_str}")
 
-    # 1. Obtener datos de Salud / Bienestar del día (ESTADO PRE-ENTRENO)
-    wellness, err_w = await fetch_intervals_data(f"wellness/{today_str}")
-    
-    # 2. Obtener actividades / planes del día (ESTADO POST-ENTRENO O PLAN)
-    events, err_e = await fetch_intervals_data("events", {"oldest": today_str, "newest": today_str})
+    if err or not wellness:
+        return "⚠️ No hay métricas de salud o descanso registradas para hoy."
 
-    if err_w and err_e:
-        return "⚠️ No se pudieron obtener los datos de la jornada."
-
-    # --- PROCESAR FISIOLOGÍA PRE-ENTRENO ---
-    hrv = wellness.get("hrv") if wellness and wellness.get("hrv") is not None else None
-    rhr = wellness.get("restingHR") if wellness and wellness.get("restingHR") is not None else "N/D"
-    sleep_sec = wellness.get("sleepSecs", 0) if wellness else 0
+    hrv = wellness.get("hrv")
+    rhr = wellness.get("restingHR", "N/D")
+    sleep_sec = wellness.get("sleepSecs", 0)
     sleep_hours = round(sleep_sec / 3600, 1) if sleep_sec else "N/D"
-    
-    ctl_raw = wellness.get("ctl") if wellness else None
-    atl_raw = wellness.get("atl") if wellness else None
-
-    # Formateo y redondeo de métricas numéricas
-    ctl = round(ctl_raw, 1) if isinstance(ctl_raw, (int, float)) else "N/D"
-    atl = round(atl_raw, 1) if isinstance(atl_raw, (int, float)) else "N/D"
-    tsb = round(ctl - atl, 1) if isinstance(ctl, (int, float)) and isinstance(atl, (int, float)) else "N/D"
+    readiness = wellness.get("readiness", "N/D")
 
     hrv_str = f"{round(hrv, 1)} ms" if isinstance(hrv, (int, float)) else "N/D"
 
-    msg_pre = (
-        f"🧘 *ESTADO FISIOLÓGICO Y RECUPERACIÓN (PRE-ENTRENO)*\n"
+    return (
+        f"🫀 *SALUD, VFC Y DESCANSO*\n"
         f"📅 Fecha: `{today_str}`\n\n"
         f"• *VFC / HRV:* {hrv_str}\n"
         f"• *FC Reposo:* {rhr} ppm\n"
         f"• *Sueño:* {sleep_hours} hs\n"
-        f"• *Estado Forma (TSB):* {tsb} (CTL: {ctl} | ATL: {atl})\n"
+        f"• *Readiness / Disposición:* {readiness}\n\n"
+        f"💡 _La Variabilidad de Frecuencia Cardíaca (HRV) refleja la recuperación del sistema nervioso parasimpático._"
     )
 
-    # --- PROCESAR SESIÓN / POST-ENTRENO ---
-    if not events:
-        msg_post = "🏃 *ENTRENAMIENTO:* No hay planes ni actividades registradas hoy."
-        return f"{msg_pre}\n---\n\n{msg_post}"
+async def obtener_carga_trabajo():
+    today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
+    wellness, err = await fetch_intervals_data(f"wellness/{today_str}")
+
+    if err or not wellness:
+        return "⚠️ No hay datos de carga registrados para hoy."
+
+    ctl_raw = wellness.get("ctl")
+    atl_raw = wellness.get("atl")
+
+    ctl = round(ctl_raw, 1) if isinstance(ctl_raw, (int, float)) else "N/D"
+    atl = round(atl_raw, 1) if isinstance(atl_raw, (int, float)) else "N/D"
+    tsb = round(ctl - atl, 1) if isinstance(ctl, (int, float)) and isinstance(atl, (int, float)) else "N/D"
+
+    return (
+        f"📈 *MÉTRICAS DE CARGA Y FORMA (IMPULSE-RESPONSE)*\n"
+        f"📅 Fecha: `{today_str}`\n\n"
+        f"• *CTL (Fitness / Carga a Largo Plazo):* {ctl}\n"
+        f"• *ATL (Fatiga / Carga a Corto Plazo):* {atl}\n"
+        f"• *TSB (Forma / Frescura):* {tsb}\n\n"
+        f"💡 _Un TSB positivo indica frescura/recuperación; valores negativos (-10 a -30) indican la zona óptima de carga._"
+    )
+
+async def obtener_entrenamiento_hoy():
+    today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
+    events, err = await fetch_intervals_data("events", {"oldest": today_str, "newest": today_str})
+
+    if err or not events:
+        return f"📅 Fecha: `{today_str}`\n\n🏃 No hay planes ni actividades registradas hoy."
 
     actividades = [e for e in events if e.get("moving_time") or e.get("distance")]
 
@@ -114,7 +128,6 @@ async def obtener_estado_fisiologico_completo():
         nombre = act.get("name", "Entrenamiento")
         distancia = round(act.get("distance", 0) / 1000, 2)
         
-        # Métricas post-sesión
         icu_training_load = act.get("icu_training_load")
         load_str = round(icu_training_load, 1) if isinstance(icu_training_load, (int, float)) else "N/D"
         
@@ -127,28 +140,42 @@ async def obtener_estado_fisiologico_completo():
 
         decoupling_str = f"{round(decoupling, 1)}%" if isinstance(decoupling, (int, float)) else "N/D"
 
-        msg_post = (
-            f"⚡ *RESPUESTA POST-ENTRENO: {nombre.upper()}*\n\n"
+        return (
+            f"🏃 *SESIÓN COMPLETADA: {nombre.upper()}*\n"
+            f"📅 Fecha: `{today_str}`\n\n"
+            f"📏 *MÉTRICAS Y CARGA*\n"
             f"• *Distancia:* {distancia} km\n"
-            f"• *Carga de Estrés (TSS/Load):* {load_str}\n"
-            f"• *FC Media / Máx:* {fc_avg} / {fc_max} ppm\n"
-            f"• *Esfuerzo Percibido (RPE):* {rpe}/10\n"
-            f"• *Sensación Subjetiva:* {feeling}/5\n"
+            f"• *Carga (TSS/Load):* {load_str}\n"
+            f"• *FC Media / Máx:* {fc_avg} / {fc_max} ppm\n\n"
+            f"🧠 *SUBJETIVO Y DESACOPLE*\n"
+            f"• *Esfuerzo (RPE):* {rpe}/10\n"
+            f"• *Sensación:* {feeling}/5\n"
             f"• *Desacople Aeróbico:* {decoupling_str}"
         )
-    else:
-        workout = events[0]
-        nombre = workout.get("name", "Planificado")
-        msg_post = (
-            f"📋 *SESIÓN PLANIFICADA HOY*\n\n"
-            f"📌 *Plan:* {nombre}\n"
-            f"⚠️ _Esperando datos sincronizados del reloj post-sesión..._"
-        )
 
-    return f"{msg_pre}\n---\n\n{msg_post}"
+    workout = events[0]
+    nombre = workout.get("name", "Planificado")
+    descripcion = workout.get("description", "Sin descripción detallada.")
+    distancia_plan = round(workout.get("distance", 0) / 1000, 2)
+
+    return (
+        f"📋 *ENTRENAMIENTO PLANIFICADO HOY*\n"
+        f"📅 Fecha: `{today_str}`\n\n"
+        f"📌 *Sesión:* {nombre}\n"
+        f"📏 *Distancia prevista:* {distancia_plan if distancia_plan > 0 else 'N/D'} km\n\n"
+        f"📝 *Detalles:* {descripcion}\n\n"
+        f"⚠️ _Aún no se ha detectado el archivo de entrenamiento completado._"
+    )
+
+async def obtener_diagnostico_completo():
+    salud = await obtener_salud_sueno()
+    carga = await obtener_carga_trabajo()
+    entreno = await obtener_entrenamiento_hoy()
+    
+    return f"{salud}\n\n---\n\n{carga}\n\n---\n\n{entreno}"
 
 # ----------------------------------------------------------------------
-# 5. MENÚ Y MANEJO DE EVENTOS DE TELEGRAM
+# 5. MENÚ Y HANDLERS DE TELEGRAM
 # ----------------------------------------------------------------------
 def main_menu_keyboard():
     keyboard = [
@@ -165,7 +192,7 @@ def main_menu_keyboard():
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "👋 **¡Hola Javier! Soy tu bot de rendimiento deportivo.**\n\n"
-        "Selecciona una opción del menú para consultar tus métricas o entrenamientos:"
+        "Selecciona una opción del menú para consultar tus métricas:"
     )
     await update.message.reply_text(
         texto,
@@ -179,15 +206,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
 
-    if data in ["diagnostico_completo", "entrenamiento_hoy", "carga", "salud_sueno"]:
-        await query.edit_message_text("🔎 *Consultando API de Intervals.icu...*", parse_mode="Markdown")
-        res = await obtener_estado_fisiologico_completo()
+    if data == "salud_sueno":
+        await query.edit_message_text("🔎 *Obteniendo datos de HRV y descanso...*", parse_mode="Markdown")
+        res = await obtener_salud_sueno()
+        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+    elif data == "carga":
+        await query.edit_message_text("🔎 *Obteniendo métricas de carga (CTL/ATL)...*", parse_mode="Markdown")
+        res = await obtener_carga_trabajo()
+        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+    elif data == "entrenamiento_hoy":
+        await query.edit_message_text("🔎 *Consultando entrenamientos de hoy...*", parse_mode="Markdown")
+        res = await obtener_entrenamiento_hoy()
+        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+    elif data == "diagnostico_completo":
+        await query.edit_message_text("🔎 *Generando diagnóstico integrado...*", parse_mode="Markdown")
+        res = await obtener_diagnostico_completo()
         await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     elif data == "menu_principal":
         texto = (
             "👋 **¡Hola Javier! Soy tu bot de rendimiento deportivo.**\n\n"
-            "Selecciona una opción del menú para consultar tus métricas o entrenamientos:"
+            "Selecciona una opción del menú para consultar tus métricas:"
         )
         await query.edit_message_text(
             texto,
@@ -202,13 +244,11 @@ if __name__ == "__main__":
     if not BOT_TOKEN:
         raise ValueError("Error: Falta BOT_TOKEN en las variables de entorno.")
 
-    # Servidor Flask en segundo plano para Keep-Alive en Render
     threading.Thread(target=run_web_server, daemon=True).start()
 
-    # Bot de Telegram asíncrono
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logging.info("Bot de rendimiento iniciado con éxito...")
+    logging.info("Bot en ejecución...")
     app.run_polling()
