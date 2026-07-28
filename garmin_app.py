@@ -34,7 +34,11 @@ TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
 
 # Inicializar configuración de Gemini SDK
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        logging.info("SDK de Gemini configurado correctamente.")
+    except Exception as e:
+        logging.error(f"Error al configurar Gemini SDK: {e}")
 
 # ----------------------------------------------------------------------
 # 2. WEBSERVER FLASK (Render Healthcheck)
@@ -46,7 +50,6 @@ def health_check():
     return "Bot de Rendimiento Deportivo activo.", 200
 
 def run_web_server():
-    # Render asigna el puerto mediante la variable PORT
     port = int(os.environ.get("PORT", 8080))
     try:
         logging.info(f"Iniciando servidor Flask en el puerto {port}...")
@@ -98,13 +101,13 @@ async def obtener_salud_sueno():
         f"🫀 *SALUD, VFC Y DESCANSO*\n"
         f"📅 Fecha: `{today_str}`\n\n"
         f"• *VFC / HRV:* {hrv_str}\n"
-        f"  └ _Variabilidad de Frecuencia Cardíaca (RMSSD). Mayor valor = mejor recuperación del sistema nervioso parasimpático._\n\n"
+        f"  └ _Variabilidad de Frecuencia Cardíaca (RMSSD)._\n\n"
         f"• *FC Reposo:* {rhr} ppm\n"
-        f"  └ _Frecuencia cardíaca en reposo. Un incremento anormal puede indicar fatiga o infección._\n\n"
+        f"  └ _Frecuencia cardíaca en reposo._\n\n"
         f"• *Sueño:* {sleep_hours} hs\n"
         f"  └ _Tiempo total de descanso nocturno._\n\n"
         f"• *Readiness / Disposición:* {readiness}\n"
-        f"  └ _Puntuación de preparación para asimilar carga de entrenamiento._"
+        f"  └ _Puntuación de preparación para asimilar carga._"
     )
 
 async def obtener_carga_trabajo():
@@ -125,11 +128,11 @@ async def obtener_carga_trabajo():
         f"📈 *MÉTRICAS DE CARGA Y FORMA (MODELO IMPULSO-RESPUESTA)*\n"
         f"📅 Fecha: `{today_str}`\n\n"
         f"• *CTL (Chronic Training Load / Fitness):* {ctl}\n"
-        f"  └ _Carga histórica acumulada (últimos 42 días). Refleja tu nivel de condición física base._\n\n"
+        f"  └ _Carga histórica acumulada (últimos 42 días)._\n\n"
         f"• *ATL (Acute Training Load / Fatiga):* {atl}\n"
-        f"  └ _Carga reciente (últimos 7 días). Refleja el cansancio acumulado a corto plazo._\n\n"
+        f"  └ _Carga reciente (últimos 7 días)._\n\n"
         f"• *TSB (Training Stress Balance / Forma):* {tsb}\n"
-        f"  └ _Resultado de CTL - ATL. Indica tu nivel de frescura o preparación actual._\n\n"
+        f"  └ _Resultado de CTL - ATL._\n\n"
         f"💡 *Guía rápida de TSB:*\n"
         f"• `> +10`: Frescura / Transición o Pacing de competición.\n"
         f"• `-10 a -30`: Zona óptima de estimulación y sobrecarga progresiva.\n"
@@ -139,7 +142,7 @@ async def obtener_carga_trabajo():
 async def obtener_entrenamiento_hoy():
     today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
     
-    # 1. Buscamos primero en las ACTIVIDADES REALIZADAS (subidas desde el reloj)
+    # 1. Buscamos primero en las ACTIVIDADES REALIZADAS
     actividades, err = await fetch_intervals_data("activities", {"oldest": today_str, "newest": today_str})
 
     if actividades and len(actividades) > 0:
@@ -168,7 +171,7 @@ async def obtener_entrenamiento_hoy():
             f"• *Desacople Aeróbico:* {decoupling_str}"
         )
 
-    # 2. Si no hay actividad completada, buscamos si había algo PLANIFICADO en 'events'
+    # 2. Si no hay actividad completada, buscamos en eventos planificados
     events, err_ev = await fetch_intervals_data("events", {"oldest": today_str, "newest": today_str})
     if events and len(events) > 0:
         workout = events[0]
@@ -261,30 +264,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 # 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
 # ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
-# ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
-    if not ai_client:
+    if not GEMINI_API_KEY:
         await update.message.reply_text(
             "⚠️ *La AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.",
             parse_mode="Markdown"
         )
         return
 
-    # Enviamos primero el mensaje de carga para feedback inmediato
     thinking_msg = await update.message.reply_text(
         "🧠 *Analizando tus datos fisiológicos con AI...*", 
         parse_mode="Markdown"
     )
 
     try:
-        # Obtenemos el contexto actual de la fisiología
         contexto_fisiologico = await obtener_diagnostico_completo()
 
         prompt_completo = (
@@ -298,26 +293,23 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Intento de generación con fallback de modelos
         respuesta_ai = None
-        modelos_a_probar = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-flash']
+        # Probamos los nombres de modelo compatibles con google.generativeai
+        modelos_a_probar = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'gemini-1.5-flash']
 
-        for model_name in modelos_a_probar:
+        for m_name in modelos_a_probar:
             try:
-                response = ai_client.models.generate_content(
-                    model=model_name,
-                    contents=prompt_completo
-                )
-                if response and response.text:
-                    respuesta_ai = response.text
+                model = genai.GenerativeModel(m_name)
+                res = model.generate_content(prompt_completo)
+                if res and res.text:
+                    respuesta_ai = res.text
                     break
-            except Exception as m_err:
-                logging.warning(f"Fallo con modelo {model_name}: {m_err}")
+            except Exception as ex_m:
+                logging.warning(f"Error probando {m_name}: {ex_m}")
 
         if not respuesta_ai:
-            raise Exception("No se pudo obtener respuesta de ningún modelo de Gemini.")
+            raise Exception("No se pudo obtener respuesta de la API de Gemini.")
 
-        # Enviamos la respuesta formateada en Markdown (o fallback a texto plano si falla el parseo)
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
@@ -330,6 +322,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=main_menu_keyboard()
         )
+
 # ----------------------------------------------------------------------
 # 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
