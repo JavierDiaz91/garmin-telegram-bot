@@ -261,11 +261,11 @@ def main_menu_keyboard():
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "👋 **¡Hola Javi! Soy tu bot de rendimiento deportivo.**\n\n"
-        "• Usá la **botonera** para consultar tus métricas en vivo.\n"
-        "• O **escribime cualquier pregunta en texto** y la analizaré con AI junto a tus datos fisiológicos."
+        "• Usá las**opciones** para consultar tus métricas en vivo.\n"
+        "• O **escribime cualquier pregunta en texto** y la analizaré junto a tus datos fisiológicos."
     )
     await update.message.reply_text(
-        texto,
+        texto, 
         parse_mode="Markdown",
         reply_markup=main_menu_keyboard()
     )
