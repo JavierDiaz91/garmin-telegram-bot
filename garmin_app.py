@@ -5,7 +5,7 @@ import logging
 import threading
 import httpx
 from flask import Flask
-from google import genai
+from groq import Groq
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -28,18 +28,18 @@ logging.basicConfig(
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
 ATHLETE_ID = os.getenv("ATHLETE_ID")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
 
-# Inicializar cliente SDK moderna google-genai
-ai_client = None
-if GEMINI_API_KEY:
+# Inicializar cliente de Groq (Llama 3.3 70B)
+groq_client = None
+if GROQ_API_KEY:
     try:
-        ai_client = genai.Client(api_key=GEMINI_API_KEY)
-        logging.info("Cliente de Gemini (google-genai) inicializado correctamente.")
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        logging.info("Cliente de Groq (Llama 3.3) inicializado correctamente.")
     except Exception as e:
-        logging.error(f"Error al inicializar cliente de Gemini: {e}")
+        logging.error(f"Error al inicializar cliente de Groq: {e}")
 
 # ----------------------------------------------------------------------
 # 2. WEBSERVER FLASK (Render Healthcheck)
@@ -142,7 +142,6 @@ async def obtener_carga_trabajo():
 
 async def obtener_recuperacion_y_gasto():
     """Consulta la última actividad registrada para extraer recuperación, calorías y pérdida de líquidos"""
-    # Traemos las últimas 5 actividades para garantizar encontrar la más reciente
     actividades, err = await fetch_intervals_data("activities", {"limit": 5})
 
     if err or not actividades or len(actividades) == 0:
@@ -156,12 +155,11 @@ async def obtener_recuperacion_y_gasto():
     calories = act.get("calories") or act.get("icu_joules", 0) / 1000
     cal_str = f"{int(calories)} kcal" if calories else "N/D"
 
-    # Tiempo estimado de recuperación (si la API devuelve el campo en horas o segundos)
-    rec_time = act.get("recovery_time") # en horas o minutos según dispositivo
+    # Tiempo de recuperación
+    rec_time = act.get("recovery_time")
     if isinstance(rec_time, (int, float)):
         rec_str = f"{round(rec_time, 1)} hs"
     else:
-        # Estimación basada en TSS/Load si no viene directo de Garmin
         tss = act.get("icu_training_load", 0)
         if tss:
             horas_est = round(tss / 3.5, 1)
@@ -169,7 +167,7 @@ async def obtener_recuperacion_y_gasto():
         else:
             rec_str = "N/D"
 
-    # Deshidratación / Pérdida estimada de sudor (en ml / litros)
+    # Pérdida de líquidos
     water_loss = act.get("water_loss") or act.get("sweat_loss")
     if isinstance(water_loss, (int, float)):
         agua_str = f"{round(water_loss / 1000, 2)} L ({int(water_loss)} ml)"
@@ -264,7 +262,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "👋 **¡Hola Javi! Soy tu bot de rendimiento deportivo.**\n\n"
         "• Usá la **botonera** para consultar tus métricas en vivo.\n"
-        "• O **escribime cualquier pregunta en texto** (ej: *'¿Cómo estoy para entrenar hoy con mi deshidratación y descanso actual?'*) y la analizaré con AI junto a tus datos."
+        "• O **escribime cualquier pregunta en texto** y la analizaré con AI junto a tus datos fisiológicos."
     )
     await update.message.reply_text(
         texto,
@@ -315,30 +313,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # ----------------------------------------------------------------------
-# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
+# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (GROQ / LLAMA 3.3 70B)
 # ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
-    if not ai_client:
+    if not groq_client:
         await update.message.reply_text(
-            "⚠️ *La AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.",
+            "⚠️ *La AI no está configurada.* Falta la variable `GROQ_API_KEY` en Render.",
             parse_mode="Markdown"
         )
         return
 
     thinking_msg = await update.message.reply_text(
-        "🧠 *Analizando tus datos fisiológicos con AI...*", 
+        "🧠 *Analizando tus datos fisiológicos con Groq AI...*", 
         parse_mode="Markdown"
     )
 
     try:
         contexto_fisiologico = await obtener_diagnostico_completo()
 
-        prompt_completo = (
-            "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional.\n"
-            "Analizá la consulta del atleta junto a sus datos fisiológicos, estado de recuperación, hidratación y entrenamiento actual. "
-            "Ofrecé recomendaciones prácticas basadas en ciencia del deporte.\n\n"
+        system_instruction = (
+            "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional. "
+            "Analizás las consultas del atleta considerando sus datos de fatiga, HRV, descanso, tiempo de recuperación, "
+            "calorías e hidratación. Brindás consejos prácticos fundamentados en ciencia del deporte."
+        )
+
+        user_content = (
             f"DATOS FISIOLÓGICOS Y DE ENTRENAMIENTO DEL ATLETA:\n"
             f"---------------------------------------------------\n"
             f"{contexto_fisiologico}\n"
@@ -346,13 +347,18 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Nombre de modelo oficial para la SDK google-genai
-        response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt_completo
+        # Invocación ultra-rápida a Llama 3.3 70B vía Groq
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_content}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.6,
+            max_tokens=1000
         )
 
-        respuesta_ai = response.text
+        respuesta_ai = chat_completion.choices[0].message.content
 
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
@@ -360,7 +366,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await thinking_msg.edit_text(respuesta_ai, reply_markup=main_menu_keyboard())
 
     except Exception as e:
-        logging.error(f"Error generando respuesta AI: {e}")
+        logging.error(f"Error generando respuesta con Groq: {e}")
         await thinking_msg.edit_text(
             f"❌ *Error al procesar la AI:* `{e}`", 
             parse_mode="Markdown",
@@ -383,5 +389,5 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_text))
 
-    logging.info("Bot con IA en ejecución...")
+    logging.info("Bot con IA Groq en ejecución...")
     app.run_polling()
