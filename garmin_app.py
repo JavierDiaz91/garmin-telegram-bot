@@ -32,7 +32,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
 
-# Inicializar cliente de la nueva SDK google-genai
+# Inicializar cliente SDK moderna google-genai
 ai_client = None
 if GEMINI_API_KEY:
     try:
@@ -140,10 +140,56 @@ async def obtener_carga_trabajo():
         f"• `< -30`: Riesgo elevado de sobreentrenamiento / lesión."
     )
 
+async def obtener_recuperacion_y_gasto():
+    """Consulta la última actividad registrada para extraer recuperación, calorías y pérdida de líquidos"""
+    # Traemos las últimas 5 actividades para garantizar encontrar la más reciente
+    actividades, err = await fetch_intervals_data("activities", {"limit": 5})
+
+    if err or not actividades or len(actividades) == 0:
+        return "⚠️ No se encontraron sesiones recientes para calcular recuperación e hidratación."
+
+    act = actividades[0]
+    nombre = act.get("name", "Última sesión")
+    fecha_act = act.get("start_date_local", "")[:10]
+
+    # Calorías / Kilojulios
+    calories = act.get("calories") or act.get("icu_joules", 0) / 1000
+    cal_str = f"{int(calories)} kcal" if calories else "N/D"
+
+    # Tiempo estimado de recuperación (si la API devuelve el campo en horas o segundos)
+    rec_time = act.get("recovery_time") # en horas o minutos según dispositivo
+    if isinstance(rec_time, (int, float)):
+        rec_str = f"{round(rec_time, 1)} hs"
+    else:
+        # Estimación basada en TSS/Load si no viene directo de Garmin
+        tss = act.get("icu_training_load", 0)
+        if tss:
+            horas_est = round(tss / 3.5, 1)
+            rec_str = f"~{horas_est} hs (estimado según TSS {round(tss, 1)})"
+        else:
+            rec_str = "N/D"
+
+    # Deshidratación / Pérdida estimada de sudor (en ml / litros)
+    water_loss = act.get("water_loss") or act.get("sweat_loss")
+    if isinstance(water_loss, (int, float)):
+        agua_str = f"{round(water_loss / 1000, 2)} L ({int(water_loss)} ml)"
+    else:
+        agua_str = "N/D (requiere sensor/Garmin compatible)"
+
+    return (
+        f"🔋 *RECUPERACIÓN, CALORÍAS Y HIDRATACIÓN*\n"
+        f"📌 Basado en: *{nombre}* (`{fecha_act}`)\n\n"
+        f"• *Tiempo estimado de recuperación:* {rec_str}\n"
+        f"  └ _Ventana requerida antes de un nuevo estímulo de alta intensidad._\n\n"
+        f"• *Calorías quemadas:* {cal_str}\n"
+        f"  └ _Gasto energético total del entrenamiento._\n\n"
+        f"• *Pérdida estimada de líquidos / Deshidratación:* {agua_str}\n"
+        f"  └ _Volumen de reposición hídrica recomendado._"
+    )
+
 async def obtener_entrenamiento_hoy():
     today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
     
-    # 1. Buscamos primero en las ACTIVIDADES REALIZADAS
     actividades, err = await fetch_intervals_data("activities", {"oldest": today_str, "newest": today_str})
 
     if actividades and len(actividades) > 0:
@@ -172,7 +218,6 @@ async def obtener_entrenamiento_hoy():
             f"• *Desacople Aeróbico:* {decoupling_str}"
         )
 
-    # 2. Si no hay actividad completada, buscamos en eventos planificados
     events, err_ev = await fetch_intervals_data("events", {"oldest": today_str, "newest": today_str})
     if events and len(events) > 0:
         workout = events[0]
@@ -194,9 +239,10 @@ async def obtener_entrenamiento_hoy():
 async def obtener_diagnostico_completo():
     salud = await obtener_salud_sueno()
     carga = await obtener_carga_trabajo()
+    recuperacion = await obtener_recuperacion_y_gasto()
     entreno = await obtener_entrenamiento_hoy()
     
-    return f"{salud}\n\n---\n\n{carga}\n\n---\n\n{entreno}"
+    return f"{salud}\n\n---\n\n{carga}\n\n---\n\n{recuperacion}\n\n---\n\n{entreno}"
 
 # ----------------------------------------------------------------------
 # 5. MENÚ Y HANDLERS DE TELEGRAM
@@ -209,6 +255,7 @@ def main_menu_keyboard():
             InlineKeyboardButton("📈 Carga (CTL/ATL)", callback_data="carga"),
             InlineKeyboardButton("🫀 Salud y Sueño", callback_data="salud_sueno")
         ],
+        [InlineKeyboardButton("🔋 Recuperación y Calorías", callback_data="recuperacion_gasto")],
         [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_principal")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -217,7 +264,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "👋 **¡Hola Javi! Soy tu bot de rendimiento deportivo.**\n\n"
         "• Usá la **botonera** para consultar tus métricas en vivo.\n"
-        "• O **escribime cualquier pregunta en texto** (ej: *'¿Cómo me conviene afrontar el entreno de hoy con mi fatiga actual?'*) y la analizaré con AI junto a tus datos."
+        "• O **escribime cualquier pregunta en texto** (ej: *'¿Cómo estoy para entrenar hoy con mi deshidratación y descanso actual?'*) y la analizaré con AI junto a tus datos."
     )
     await update.message.reply_text(
         texto,
@@ -239,6 +286,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "carga":
         await query.edit_message_text("🔎 *Obteniendo métricas de carga (CTL/ATL)...*", parse_mode="Markdown")
         res = await obtener_carga_trabajo()
+        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+    elif data == "recuperacion_gasto":
+        await query.edit_message_text("🔎 *Analizando recuperación, calorías e hidratación...*", parse_mode="Markdown")
+        res = await obtener_recuperacion_y_gasto()
         await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     elif data == "entrenamiento_hoy":
@@ -265,9 +317,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 # 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
 # ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
-# ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
@@ -288,18 +337,18 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         prompt_completo = (
             "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional.\n"
-            "Analizá la consulta del atleta junto a sus datos fisiológicos y de entrenamiento actuales. "
+            "Analizá la consulta del atleta junto a sus datos fisiológicos, estado de recuperación, hidratación y entrenamiento actual. "
             "Ofrecé recomendaciones prácticas basadas en ciencia del deporte.\n\n"
-            f"DATOS FISIOLÓGICOS Y DE ENTRENAMIENTO DEL ATLETA (HOY):\n"
+            f"DATOS FISIOLÓGICOS Y DE ENTRENAMIENTO DEL ATLETA:\n"
             f"---------------------------------------------------\n"
             f"{contexto_fisiologico}\n"
             f"---------------------------------------------------\n\n"
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Nombre del modelo válido y soportado en la API
+        # Nombre de modelo oficial para la SDK google-genai
         response = ai_client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',
             contents=prompt_completo
         )
 
@@ -317,6 +366,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=main_menu_keyboard()
         )
+
 # ----------------------------------------------------------------------
 # 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
@@ -331,8 +381,6 @@ if __name__ == "__main__":
     # Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_handler))
-    
-    # Handler para cualquier mensaje de texto libre (no comando)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_text))
 
     logging.info("Bot con IA en ejecución...")
