@@ -265,6 +265,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 # 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
+# ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
@@ -294,9 +297,9 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Usamos el modelo rápido y estable de la SDK moderna google-genai
+        # Nombre del modelo válido y soportado en la API
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash',
             contents=prompt_completo
         )
 
@@ -314,7 +317,6 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=main_menu_keyboard()
         )
-
 # ----------------------------------------------------------------------
 # 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
