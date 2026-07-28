@@ -46,8 +46,13 @@ def health_check():
     return "Bot de Rendimiento Deportivo activo.", 200
 
 def run_web_server():
+    # Render asigna el puerto mediante la variable PORT
     port = int(os.environ.get("PORT", 8080))
-    server.run(host="0.0.0.0", port=port)
+    try:
+        logging.info(f"Iniciando servidor Flask en el puerto {port}...")
+        server.run(host="0.0.0.0", port=port, use_reloader=False)
+    except Exception as e:
+        logging.error(f"Error al iniciar servidor Flask: {e}")
 
 # ----------------------------------------------------------------------
 # 3. CLIENTE ASÍNCRONO DE INTERVALS.ICU
