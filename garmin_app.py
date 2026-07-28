@@ -303,7 +303,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu_principal":
         texto = (
-            "👋 **¡Hola Javier! Soy tu bot de rendimiento deportivo.**\n\n"
+            "👋 **¡Hola Javi! que bueno que trabajemos juntos y asi poder evaluar tu rendimiento deportivo.**\n\n"
             "Selecciona una opción del menú o escribime una consulta:"
         )
         await query.edit_message_text(
@@ -326,7 +326,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     thinking_msg = await update.message.reply_text(
-        "🧠 *Analizando tus datos fisiológicos con Groq AI...*", 
+        "🧠 *Javi, aguarda un instate mientras analizo tu consulta...*", 
         parse_mode="Markdown"
     )
 
@@ -336,7 +336,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         system_instruction = (
             "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional. "
             "Analizás las consultas del atleta considerando sus datos de fatiga, HRV, descanso, tiempo de recuperación, "
-            "calorías e hidratación. Brindás consejos prácticos fundamentados en ciencia del deporte."
+            "calorías e hidratación. Brindás consejos prácticos fundamentados en ciencia del deporte, ademas responde a las preguntas del atleta, con respuestas cortas y bien respondidas, dirigiendote a el por su nombre javii.."
         )
 
         user_content = (
