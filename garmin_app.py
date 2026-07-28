@@ -262,7 +262,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "👋 **¡Hola Javi! que necesitas saber hoy?.**\n\n"
         "• Usá las **opciones** para consultar tus métricas en vivo.\n"
-        "• O **escribime cualquier pregunta en texto** y la analizaré con AIjunto a tus datos fisiológicos."
+        "• O **escribime cualquier pregunta en texto** y la analizaré junto a tus datos fisiológicos."
     )
     await update.message.reply_text(
         texto, 
