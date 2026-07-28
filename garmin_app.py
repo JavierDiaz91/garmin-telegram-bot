@@ -261,12 +261,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 # 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
+# ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
-    if not GEMINI_API_KEY:
+    if not ai_client:
         await update.message.reply_text(
-            "⚠️ *La integración con AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.",
+            "⚠️ *La AI no está configurada o disponible.* Verificá la variable `GEMINI_API_KEY` en Render.",
             parse_mode="Markdown"
         )
         return
@@ -277,13 +280,13 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        # Obtenemos el contexto actual de la fisiología
+        # Obtenemos el contexto actual de la fisiología y entrenamiento
         contexto_fisiologico = await obtener_diagnostico_completo()
 
         prompt_completo = (
-            "Eres un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional.\n"
-            "Analiza la consulta del atleta junto a sus datos fisiológicos y de entrenamiento actuales. "
-            "Ofrece recomendaciones prácticas basadas en ciencia del deporte.\n\n"
+            "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional.\n"
+            "Analizá la consulta del atleta junto a sus datos fisiológicos y de entrenamiento actuales. "
+            "Ofrecé recomendaciones prácticas basadas en ciencia del deporte.\n\n"
             f"DATOS FISIOLÓGICOS Y DE ENTRENAMIENTO DEL ATLETA (HOY):\n"
             f"---------------------------------------------------\n"
             f"{contexto_fisiologico}\n"
@@ -291,13 +294,15 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Usar el identificador con 'models/' explícito
-        model = genai.GenerativeModel('models/gemini-1.5-flash')
-        response = model.generate_content(prompt_completo)
+        # Usamos el modelo optimizado y soportado gemini-2.5-flash
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt_completo
+        )
 
         respuesta_ai = response.text
 
-        # Enviamos la respuesta
+        # Enviamos la respuesta formateada en Markdown (o fallback a texto plano si hay caracteres especiales)
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
