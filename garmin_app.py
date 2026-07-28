@@ -5,7 +5,7 @@ import logging
 import threading
 import httpx
 from flask import Flask
-import google.generativeai as genai
+from google import genai
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -32,13 +32,14 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
 
-# Inicializar configuración de Gemini SDK
+# Inicializar cliente de la nueva SDK google-genai
+ai_client = None
 if GEMINI_API_KEY:
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        logging.info("SDK de Gemini configurado correctamente.")
+        ai_client = genai.Client(api_key=GEMINI_API_KEY)
+        logging.info("Cliente de Gemini (google-genai) inicializado correctamente.")
     except Exception as e:
-        logging.error(f"Error al configurar Gemini SDK: {e}")
+        logging.error(f"Error al inicializar cliente de Gemini: {e}")
 
 # ----------------------------------------------------------------------
 # 2. WEBSERVER FLASK (Render Healthcheck)
@@ -267,7 +268,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
-    if not GEMINI_API_KEY:
+    if not ai_client:
         await update.message.reply_text(
             "⚠️ *La AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.",
             parse_mode="Markdown"
@@ -293,22 +294,13 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        respuesta_ai = None
-        # Probamos los nombres de modelo compatibles con google.generativeai
-        modelos_a_probar = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'gemini-1.5-flash']
+        # Usamos el modelo rápido y estable de la SDK moderna google-genai
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt_completo
+        )
 
-        for m_name in modelos_a_probar:
-            try:
-                model = genai.GenerativeModel(m_name)
-                res = model.generate_content(prompt_completo)
-                if res and res.text:
-                    respuesta_ai = res.text
-                    break
-            except Exception as ex_m:
-                logging.warning(f"Error probando {m_name}: {ex_m}")
-
-        if not respuesta_ai:
-            raise Exception("No se pudo obtener respuesta de la API de Gemini.")
+        respuesta_ai = response.text
 
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())

@@ -1,4 +1,5 @@
 python-telegram-bot[job-queue]
-requests
+google-genai
+httpx
 flask
-google-generativeai
+gunicorn
