@@ -264,23 +264,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 # 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# 6. MANEJADOR DE CHAT/PREGUNTAS CON AI (Gemini)
+# ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
     if not ai_client:
         await update.message.reply_text(
-            "⚠️ *La AI no está configurada o disponible.* Verificá la variable `GEMINI_API_KEY` en Render.",
+            "⚠️ *La AI no está configurada.* Falta la variable `GEMINI_API_KEY` en Render.",
             parse_mode="Markdown"
         )
         return
 
+    # Enviamos primero el mensaje de carga para feedback inmediato
     thinking_msg = await update.message.reply_text(
         "🧠 *Analizando tus datos fisiológicos con AI...*", 
         parse_mode="Markdown"
     )
 
     try:
-        # Obtenemos el contexto actual de la fisiología y entrenamiento
+        # Obtenemos el contexto actual de la fisiología
         contexto_fisiologico = await obtener_diagnostico_completo()
 
         prompt_completo = (
@@ -294,15 +298,26 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Usamos el modelo optimizado y soportado gemini-2.5-flash
-        response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt_completo
-        )
+        # Intento de generación con fallback de modelos
+        respuesta_ai = None
+        modelos_a_probar = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-flash']
 
-        respuesta_ai = response.text
+        for model_name in modelos_a_probar:
+            try:
+                response = ai_client.models.generate_content(
+                    model=model_name,
+                    contents=prompt_completo
+                )
+                if response and response.text:
+                    respuesta_ai = response.text
+                    break
+            except Exception as m_err:
+                logging.warning(f"Fallo con modelo {model_name}: {m_err}")
 
-        # Enviamos la respuesta formateada en Markdown (o fallback a texto plano si hay caracteres especiales)
+        if not respuesta_ai:
+            raise Exception("No se pudo obtener respuesta de ningún modelo de Gemini.")
+
+        # Enviamos la respuesta formateada en Markdown (o fallback a texto plano si falla el parseo)
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
@@ -311,11 +326,10 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"Error generando respuesta AI: {e}")
         await thinking_msg.edit_text(
-            f"❌ Error al consultar la AI: `{e}`", 
+            f"❌ *Error al procesar la AI:* `{e}`", 
             parse_mode="Markdown",
             reply_markup=main_menu_keyboard()
         )
-
 # ----------------------------------------------------------------------
 # 7. ARRANQUE DEL BOT
 # ----------------------------------------------------------------------
