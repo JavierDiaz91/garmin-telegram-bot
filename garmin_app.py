@@ -80,35 +80,58 @@ async def fetch_intervals_data(endpoint: str, params: dict = None):
         return None, "⚠️ Error de conexión con Intervals.icu."
 
 # ----------------------------------------------------------------------
-# 4. FUNCIONES MODULARES DE CONSULTA
+# 4. FUNCIONES MODULARES Y DE HISTORIAL
 # ----------------------------------------------------------------------
 
 async def obtener_salud_sueno():
-    today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
-    wellness, err = await fetch_intervals_data(f"wellness/{today_str}")
+    now = datetime.datetime.now(TZ_AR)
+    today_str = now.strftime("%Y-%m-%d")
+    yesterday_str = (now - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
 
-    if err or not wellness:
-        return "⚠️ No hay métricas de salud o descanso registradas para hoy."
+    # Solicitamos el rango de los últimos 2 días a Intervals.icu
+    wellness_list, err = await fetch_intervals_data("wellness", {"oldest": yesterday_str, "newest": today_str})
 
-    hrv = wellness.get("hrv")
-    rhr = wellness.get("restingHR", "N/D")
-    sleep_sec = wellness.get("sleepSecs", 0)
-    sleep_hours = round(sleep_sec / 3600, 1) if sleep_sec else "N/D"
-    readiness = wellness.get("readiness", "N/D")
+    if err or not wellness_list:
+        # Intento individual por fecha de hoy como resguardo
+        wellness_today, _ = await fetch_intervals_data(f"wellness/{today_str}")
+        wellness_list = [wellness_today] if wellness_today else []
 
-    hrv_str = f"{round(hrv, 1)} ms" if isinstance(hrv, (int, float)) else "N/D"
+    if not wellness_list:
+        return "⚠️ No hay métricas de salud o descanso registradas para ayer ni hoy."
+
+    datos_por_fecha = {}
+    if isinstance(wellness_list, list):
+        for item in wellness_list:
+            if isinstance(item, dict):
+                datos_por_fecha[item.get("id")] = item
+
+    hoy = datos_por_fecha.get(today_str, {})
+    ayer = datos_por_fecha.get(yesterday_str, {})
+
+    # Valores HOY
+    hrv_hoy = f"{round(hoy.get('hrv'), 1)} ms" if isinstance(hoy.get("hrv"), (int, float)) else "N/D"
+    rhr_hoy = hoy.get("restingHR", "N/D")
+    sleep_sec_hoy = hoy.get("sleepSecs", 0)
+    sleep_hours_hoy = round(sleep_sec_hoy / 3600, 1) if sleep_sec_hoy else "N/D"
+    readiness_hoy = hoy.get("readiness", "N/D")
+
+    # Valores AYER
+    hrv_ayer = f"{round(ayer.get('hrv'), 1)} ms" if isinstance(ayer.get("hrv"), (int, float)) else "N/D"
+    rhr_ayer = ayer.get("restingHR", "N/D")
+    sleep_sec_ayer = ayer.get("sleepSecs", 0)
+    sleep_hours_ayer = round(sleep_sec_ayer / 3600, 1) if sleep_sec_ayer else "N/D"
 
     return (
-        f"🫀 *SALUD, VFC Y DESCANSO*\n"
-        f"📅 Fecha: `{today_str}`\n\n"
-        f"• *VFC / HRV:* {hrv_str}\n"
-        f"  └ _Variabilidad de Frecuencia Cardíaca (RMSSD)._\n\n"
-        f"• *FC Reposo:* {rhr} ppm\n"
-        f"  └ _Frecuencia cardíaca en reposo._\n\n"
-        f"• *Sueño:* {sleep_hours} hs\n"
-        f"  └ _Tiempo total de descanso nocturno._\n\n"
-        f"• *Readiness / Disposición:* {readiness}\n"
-        f"  └ _Puntuación de preparación para asimilar carga._"
+        f"🫀 *SALUD, VFC Y DESCANSO (COMPARATIVO)*\n\n"
+        f"📅 *HOY (`{today_str}`):*\n"
+        f"• *Sueño:* {sleep_hours_hoy} hs\n"
+        f"• *VFC / HRV:* {hrv_hoy}\n"
+        f"• *FC Reposo:* {rhr_hoy} ppm\n"
+        f"• *Readiness:* {readiness_hoy}\n\n"
+        f"📅 *AYER (`{yesterday_str}`):*\n"
+        f"• *Sueño:* {sleep_hours_ayer} hs\n"
+        f"• *VFC / HRV:* {hrv_ayer}\n"
+        f"• *FC Reposo:* {rhr_ayer} ppm"
     )
 
 async def obtener_carga_trabajo():
@@ -141,7 +164,6 @@ async def obtener_carga_trabajo():
     )
 
 async def obtener_recuperacion_y_gasto():
-    """Consulta la última actividad registrada para extraer recuperación, calorías y pérdida de líquidos"""
     actividades, err = await fetch_intervals_data("activities", {"limit": 5})
 
     if err or not actividades or len(actividades) == 0:
@@ -151,11 +173,9 @@ async def obtener_recuperacion_y_gasto():
     nombre = act.get("name", "Última sesión")
     fecha_act = act.get("start_date_local", "")[:10]
 
-    # Calorías / Kilojulios
     calories = act.get("calories") or act.get("icu_joules", 0) / 1000
     cal_str = f"{int(calories)} kcal" if calories else "N/D"
 
-    # Tiempo de recuperación
     rec_time = act.get("recovery_time")
     if isinstance(rec_time, (int, float)):
         rec_str = f"{round(rec_time, 1)} hs"
@@ -167,7 +187,6 @@ async def obtener_recuperacion_y_gasto():
         else:
             rec_str = "N/D"
 
-    # Pérdida de líquidos
     water_loss = act.get("water_loss") or act.get("sweat_loss")
     if isinstance(water_loss, (int, float)):
         agua_str = f"{round(water_loss / 1000, 2)} L ({int(water_loss)} ml)"
@@ -234,13 +253,73 @@ async def obtener_entrenamiento_hoy():
 
     return f"📅 Fecha: `{today_str}`\n\n🏃 No hay planes ni actividades registradas hoy."
 
-async def obtener_diagnostico_completo():
-    salud = await obtener_salud_sueno()
-    carga = await obtener_carga_trabajo()
-    recuperacion = await obtener_recuperacion_y_gasto()
-    entreno = await obtener_entrenamiento_hoy()
+async def obtener_historial_actividades(dias: int = 7):
+    """Obtiene el listado detallado de actividades de los últimos N días."""
+    now = datetime.datetime.now(TZ_AR)
+    today_str = now.strftime("%Y-%m-%d")
+    oldest_str = (now - datetime.timedelta(days=dias)).strftime("%Y-%m-%d")
+
+    actividades, err = await fetch_intervals_data("activities", {"oldest": oldest_str, "newest": today_str})
+
+    if err or not actividades:
+        return f"⚠️ No se registraron actividades en los últimos {dias} días."
+
+    resumen_actividades = []
+    for act in actividades:
+        fecha = act.get("start_date_local", "")[:10]
+        nombre = act.get("name", "Entrenamiento")
+        tipo = act.get("type", "Actividad")
+        distancia = round(act.get("distance", 0) / 1000, 2)
+        duracion_min = round(act.get("moving_time", 0) / 60, 1)
+        tss = round(act.get("icu_training_load", 0), 1) if act.get("icu_training_load") else "N/D"
+        fc_avg = act.get("average_heartrate", "N/D")
+        fc_max = act.get("max_heartrate", "N/D")
+        rpe = act.get("perceived_exertion", "N/D")
+        calorias = int(act.get("calories", 0) or (act.get("icu_joules", 0) / 1000))
+
+        resumen_actividades.append(
+            f"📅 Fecha: {fecha}\n"
+            f"• Sesión: {nombre} ({tipo})\n"
+            f"• Distancia/Tiempo: {distancia} km | {duracion_min} min\n"
+            f"• Carga (TSS): {tss} | RPE: {rpe}/10\n"
+            f"• FC Media/Máx: {fc_avg}/{fc_max} ppm\n"
+            f"• Gasto calórico: {calorias} kcal"
+        )
+
+    return "\n---\n".join(resumen_actividades)
+
+async def obtener_diagnostico_completo(dias_historia: int = 7):
+    """Construye el panorama integrado con historial extendido (wellness + actividades)."""
+    now = datetime.datetime.now(TZ_AR)
+    today_str = now.strftime("%Y-%m-%d")
+    oldest_str = (now - datetime.timedelta(days=dias_historia)).strftime("%Y-%m-%d")
+
+    # 1. Recuperar Wellness del periodo
+    wellness_list, _ = await fetch_intervals_data("wellness", {"oldest": oldest_str, "newest": today_str})
     
-    return f"{salud}\n\n---\n\n{carga}\n\n---\n\n{recuperacion}\n\n---\n\n{entreno}"
+    resumen_wellness = []
+    if isinstance(wellness_list, list):
+        for item in wellness_list:
+            f = item.get("id")
+            sueño = round(item.get("sleepSecs", 0) / 3600, 1) if item.get("sleepSecs") else "N/D"
+            hrv = round(item.get("hrv"), 1) if item.get("hrv") else "N/D"
+            rhr = item.get("restingHR", "N/D")
+            ctl = round(item.get("ctl"), 1) if item.get("ctl") else "N/D"
+            atl = round(item.get("atl"), 1) if item.get("atl") else "N/D"
+            resumen_wellness.append(f"[{f}] Sueño: {sueño}hs | HRV: {hrv}ms | FC Reposo: {rhr}ppm | Fitness(CTL): {ctl} | Fatiga(ATL): {atl}")
+
+    texto_wellness = "\n".join(resumen_wellness) if resumen_wellness else "Sin registros de wellness."
+
+    # 2. Recuperar Actividades del periodo
+    texto_actividades = await obtener_historial_actividades(dias=dias_historia)
+
+    return (
+        f"📌 FECHA ACTUAL DEL SERVIDOR: {today_str}\n\n"
+        f"📊 REGISTRO DE SALUD Y CARGA DÍA A DÍA (ÚLTIMOS {dias_historia} DÍAS):\n"
+        f"{texto_wellness}\n\n"
+        f"🏃 ACTIVIDADES Y ENTRENAMIENTOS REGISTRADOS (ÚLTIMOS {dias_historia} DÍAS):\n"
+        f"{texto_actividades}"
+    )
 
 # ----------------------------------------------------------------------
 # 5. MENÚ Y HANDLERS DE TELEGRAM
@@ -260,9 +339,9 @@ def main_menu_keyboard():
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "👋 **¡Hola Javi! que necesitas saber hoy?.**\n\n"
+        "👋 **¡Hola Javi! ¿Qué necesitás saber hoy?**\n\n"
         "• Usá las **opciones** para consultar tus métricas en vivo.\n"
-        "• O **escribime cualquier pregunta en texto** y la analizaré junto a tus datos fisiológicos."
+        "• O **escribime cualquier pregunta en texto** y la analizaré junto a tu historial fisiológico reciente."
     )
     await update.message.reply_text(
         texto, 
@@ -277,7 +356,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "salud_sueno":
-        await query.edit_message_text("🔎 *Obteniendo datos de HRV y descanso...*", parse_mode="Markdown")
+        await query.edit_message_text("🔎 *Obteniendo datos de HRV y descanso (Hoy vs Ayer)...*", parse_mode="Markdown")
         res = await obtener_salud_sueno()
         await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
@@ -298,13 +377,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "diagnostico_completo":
         await query.edit_message_text("🔎 *Generando diagnóstico integrado...*", parse_mode="Markdown")
-        res = await obtener_diagnostico_completo()
+        res = await obtener_diagnostico_completo(dias_historia=7)
         await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     elif data == "menu_principal":
         texto = (
-            "👋 **¡Hola Javi! que bueno que trabajemos juntos y asi poder evaluar tu rendimiento deportivo.**\n\n"
-            "Selecciona una opción del menú o escribime una consulta:"
+            "👋 **¡Hola Javi! Qué bueno que trabajemos juntos para evaluar tu rendimiento deportivo.**\n\n"
+            "Seleccioná una opción del menú o escribime una consulta:"
         )
         await query.edit_message_text(
             texto,
@@ -326,35 +405,40 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     thinking_msg = await update.message.reply_text(
-        "🧠 *Javi, aguarda un instate mientras analizo tu consulta...*", 
+        "🧠 *Javi, aguardá un instante mientras reviso tu historial y analizo los datos...*", 
         parse_mode="Markdown"
     )
 
     try:
-        contexto_fisiologico = await obtener_diagnostico_completo()
+        # Recuperamos 7 días de contexto temporal para responder preguntas relativas
+        contexto_fisiologico = await obtener_diagnostico_completo(dias_historia=7)
 
         system_instruction = (
-            "Sos un fisiólogo del deporte y entrenador de alto rendimiento con tono conciso, directo y profesional. "
-            "Analizás las consultas del atleta considerando sus datos de fatiga, HRV, descanso, tiempo de recuperación, "
-            "calorías e hidratación. Brindás consejos prácticos fundamentados en ciencia del deporte, ademas responde a las preguntas del atleta, con respuestas cortas y bien respondidas, dirigiendote a el por su nombre javii.."
+            "Sos un fisiólogo del deporte y entrenador de alto rendimiento. "
+            "Tenés acceso al historial de entrenamientos y métricas de salud del atleta (Javii) de los últimos 7 días.\n\n"
+            "REGLAS DE RESPUESTA:\n"
+            "1. Calculá las fechas relativas basándote en la FECHA ACTUAL DEL SERVIDOR indicando claramente el día al que te referís.\n"
+            "2. Si el usuario pregunta por un día específico (ej. 'el lunes', 'hace 3 días', 'el fin de semana'), filtrá los datos de la lista e indicá los detalles métricos de esa fecha.\n"
+            "3. Si no hay entrenamiento en el día consultado, aclaralo directamente.\n"
+            "4. Dirigite siempre al atleta llamándolo Javii.\n"
+            "5. Mantené un tono conciso, directo, preciso y en formato Markdown limpio."
         )
 
         user_content = (
-            f"DATOS FISIOLÓGICOS Y DE ENTRENAMIENTO DEL ATLETA:\n"
+            f"DATOS FISIOLÓGICOS Y HISTORIAL RECIENTE DEL ATLETA:\n"
             f"---------------------------------------------------\n"
             f"{contexto_fisiologico}\n"
             f"---------------------------------------------------\n\n"
             f"CONSULTA DEL ATLETA: \"{user_prompt}\""
         )
 
-        # Invocación ultra-rápida a Llama 3.3 70B vía Groq
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_content}
             ],
             model="llama-3.3-70b-versatile",
-            temperature=0.6,
+            temperature=0.3,
             max_tokens=1000
         )
 
