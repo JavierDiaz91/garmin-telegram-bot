@@ -543,6 +543,9 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 # 9. MANEJADOR DE TEXTO CON IA
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# 9. MANEJADOR DE TEXTO CON IA (CONVERSACIONAL Y NATURAL)
+# ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
@@ -550,29 +553,25 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ *La IA no está configurada.* Falta `GROQ_API_KEY`.", parse_mode="Markdown")
         return
 
-    thinking_msg = await update.message.reply_text("⚡ *Javii, procesando tu biomecánica y métricas...*", parse_mode="Markdown")
+    thinking_msg = await update.message.reply_text("⚡ *Procesando...*", parse_mode="Markdown")
 
     try:
-        contexto = await obtener_diagnostico_completo(dias_historia=7)
+        # Recuperamos solo el último entrenamiento/datos para no saturar al modelo de contexto innecesario
+        contexto = await obtener_diagnostico_completo(dias_historia=3)
 
         system_instruction = (
-            "Sos un fisiólogo del deporte, biomecánico experto en atletismo y coach de alto rendimiento.\n"
-            "Tu rol es analizar los datos biomecánicos y de carga de Javii.\n\n"
-            "REGLAS CRÍTICAS DE FORMATO PARA TELEGRAM:\n"
-            "1. PROHIBIDO usar caracteres como '##', '###', '==' o '--'.\n"
-            "2. Usa ÚNICAMENTE negritas (*texto*), viñetas con emojis o guiones.\n"
-            "3. Redondeá siempre la cadencia a números enteros (ej. '79 ppm').\n"
-            "4. Dirigite al atleta como Javii.\n\n"
-            "ESTRUCTURA DE TU RESPUESTA:\n"
-            "• Saludo breve a Javii.\n"
-            "• 📊 *Diagnóstico de Métricas Clave*: Datos numéricos precisos del entreno.\n"
-            "• 🔬 *Explicación Fisiológica / Biomecánica*: Análisis claro de eficiencia o fatiga.\n"
-            "• 💡 *Pauta para el Próximo Entreno*: Consejo o sugerencia práctica accionable."
+            "Sos el asistente personal de entrenamiento de Javii.\n"
+            "Tu objetivo es ser conciso, directo, conversacional y natural.\n\n"
+            "REGLAS CRÍTICAS DE RESPUESTA:\n"
+            "1. Responde DIRECTAMENTE a lo que Javii te pregunta. Si te hace una pregunta cerrada (ej: '¿Podés leer una foto?'), responde de forma corta, clara y amigable (ej: '¡Sí, Javii! Mandame la captura o foto del entrenamiento y te la analizo al toque.').\n"
+            "2. NO generes análisis largos ni informes de la semana a menos que Javii te pida explícitamente analizar sus datos o su entrenamiento.\n"
+            "3. PROHIBIDO usar caracteres como '##', '###', '==' o '--'. Usa negritas (*texto*) y emojis cuando sea conveniente.\n"
+            "4. Dirigite siempre como Javii."
         )
 
         user_content = (
-            f"DATOS DE INTERVALS.ICU:\n{contexto}\n\n"
-            f"PREGUNTA DE JAVII: \"{user_prompt}\""
+            f"DATOS RECIENTES DE CONTEXTO (Usar solo si es relevante a la pregunta):\n{contexto}\n\n"
+            f"MENSAJE DE JAVII: \"{user_prompt}\""
         )
 
         chat_completion = groq_client.chat.completions.create(
@@ -581,8 +580,8 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {"role": "user", "content": user_content}
             ],
             model="llama-3.3-70b-versatile",
-            temperature=0.3,
-            max_tokens=1200
+            temperature=0.4,
+            max_tokens=600
         )
 
         respuesta_ai = chat_completion.choices[0].message.content
