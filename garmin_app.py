@@ -92,8 +92,10 @@ async def obtener_dinamicas_biomecanica():
     nombre = act.get("name", "Entrenamiento")
     fecha = act.get("start_date_local", "")[:10]
     
-    # Biomecánica y Dinámicas de Carrera
-    cadencia = act.get("average_cadence", "N/D")
+    # Biomecánica y Dinámicas de Carrera (redondeo limpio)
+    cadencia_raw = act.get("average_cadence")
+    cadencia = int(round(cadencia_raw)) if isinstance(cadencia_raw, (int, float)) else "N/D"
+    
     stride_len = round(act.get("stride_length", 0), 2) if act.get("stride_length") else "N/D"
     gct = round(act.get("ground_contact_time", 0), 1) if act.get("ground_contact_time") else "N/D"
     gct_bal = act.get("ground_contact_balance", "N/D")
@@ -175,7 +177,6 @@ async def obtener_carga_trabajo():
     atl = round(wellness.get("atl", 0), 1) if wellness.get("atl") else "N/D"
     tsb = round(ctl - atl, 1) if isinstance(ctl, (int, float)) and isinstance(atl, (int, float)) else "N/D"
 
-    # Diagnóstico visual rápido de TSB
     if isinstance(tsb, (int, float)):
         if tsb > 10:
             estado_tsb = "🟢 FRESCO / RECUPERADO"
@@ -217,7 +218,10 @@ async def obtener_historial_actividades(dias: int = 7):
         dur = round(act.get("moving_time", 0) / 60, 1)
         tss = round(act.get("icu_training_load", 0), 1) if act.get("icu_training_load") else "N/D"
         fc_avg = act.get("average_heartrate", "N/D")
-        cad = act.get("average_cadence", "N/D")
+        
+        cad_raw = act.get("average_cadence")
+        cad = int(round(cad_raw)) if isinstance(cad_raw, (int, float)) else "N/D"
+        
         stride = round(act.get("stride_length", 0), 2) if act.get("stride_length") else "N/D"
 
         resumen.append(
@@ -257,7 +261,7 @@ async def obtener_diagnostico_completo(dias_historia: int = 7):
     )
 
 # ----------------------------------------------------------------------
-# 5. MENÚ Y BOTONES INTERACTIVOS MEJORADOS
+# 5. MENÚ Y BOTONES INTERACTIVOS
 # ----------------------------------------------------------------------
 def main_menu_keyboard():
     keyboard = [
@@ -306,8 +310,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "recuperacion_gasto":
         await query.edit_message_text("🔍 *Analizando hidratación y gasto calórico...*", parse_mode="Markdown")
-        res = await fetch_intervals_data("activities", {"limit": 1})
-        # Lógica de fallback para hidratación
         await query.edit_message_text("🔋 *Cálculo de recuperación disponible en texto con IA.*", parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     elif data == "entrenamiento_hoy":
@@ -339,35 +341,25 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         contexto = await obtener_diagnostico_completo(dias_historia=7)
 
+        # PROMPT OPTIMIZADO PARA TELEGRAM (SIN ALMOHADILLAS ## O ===)
         system_instruction = (
             "Sos un fisiólogo del deporte, biomecánico experto en atletismo y coach de alto rendimiento.\n"
-            "Tu rol es analizar los datos biomecánicos y de carga de Javii, traduciendo métricas complejas "
-            "en explicaciones claras, científicas y 100% aplicables a la pista o ruta.\n\n"
-            "MÉTRICAS BAJO TU ANÁLISIS:\n"
-            "- Biomecánica: Cadencia (spm), Longitud de zancada (m), Tiempo de contacto con el suelo (GCT en ms) y Oscilación vertical (cm).\n"
-            "- Fisiología y Carga: VO2Max, Variabilidad de la Frecuencia Cardíaca (HRV), Carga de entrenamiento (Acute/Chronic) y Zonas de FC.\n\n"
-            "PRINCIPIOS DE ANÁLISIS Y DOCENCIA PAR ATLETA:\n"
-            "1. RELACIÓN CAUSA-EFECTO: No te limites a dar números. Explicá cómo se relacionan entre sí. "
-            "(Ej: 'Un GCT elevado a partir del km 8 indica fatiga neuromuscular, lo que hizo subir tu oscilación vertical y perder economía de carrera').\n"
-            "2. ENFOQUE PEDAGÓGICO: Cuando uses términos técnicos (ej. rigidez musculotendinosa, rigidez de pierna / leg stiffness, deriva cardíaca), "
-            "explicá brevemente qué significan para el rendimiento o la prevención de lesiones de Javii.\n"
-            "3. ACCIÓN CONCRETA: Toda crítica o análisis debe cerrar con una sugerencia práctica "
-            "(ajuste de ritmo, ejercicios de técnica/fuerza, o gestión de descanso según el HRV).\n\n"
-            "ESTRUCTURA DE RESPUESTA:\n"
-            "- Dirigite al atleta como Javii.\n"
-            "- Título principal con emoji contextualizado según el tipo de consulta.\n"
-            "- 📊 **Diagnóstico de Métricas Clave**: Datos numéricos precisos del periodo consultado.\n"
-            "- 🔬 **Explicación Fisiológica / Biomecánica**: Análisis de eficiencia, asimetrías o fatiga.\n"
-            "- 💡 **Pauta o Ajuste para el Próximo Entreno**: Recomendación práctica y accionable.\n"
-            "- Usá formato Markdown impecable (negritas, viñetas y bloques sintéticos)."
+            "Tu rol es analizar los datos biomecánicos y de carga de Javii.\n\n"
+            "REGLAS CRÍTICAS DE FORMATO PARA TELEGRAM:\n"
+            "1. PROHIBIDO usar caracteres como '##', '###', '==' o '--'. Telegram NO soporta esos encabezados y se ven feos.\n"
+            "2. Usa ÚNICAMENTE negritas (*texto*), viñetas con emojis o guiones para estructurar el mensaje.\n"
+            "3. Redondeá siempre la cadencia a números enteros (ej. '79 ppm' en lugar de '79.45539 ppm').\n"
+            "4. Dirigite al atleta como Javii.\n\n"
+            "ESTRUCTURA DE TU RESPUESTA:\n"
+            "• Saludo breve a Javii.\n"
+            "• 📊 *Diagnóstico de Métricas Clave*: Datos numéricos precisos y redondeados del entreno.\n"
+            "• 🔬 *Explicación Fisiológica / Biomecánica*: Análisis claro de eficiencia o fatiga.\n"
+            "• 💡 *Pauta para el Próximo Entreno*: Consejo o sugerencia práctica accionable."
         )
 
         user_content = (
-            f"DATOS COMPLETOS DEL ATLETA Y BIOMECÁNICA:\n"
-            f"===================================================\n"
-            f"{contexto}\n"
-            f"===================================================\n\n"
-            f"CONSULTA DE JAVII: \"{user_prompt}\""
+            f"DATOS DE INTERVALS.ICU:\n{contexto}\n\n"
+            f"PREGUNTA DE JAVII: \"{user_prompt}\""
         )
 
         chat_completion = groq_client.chat.completions.create(
@@ -385,6 +377,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
+            # Fallback si falla el parseo de Markdown
             await thinking_msg.edit_text(respuesta_ai, reply_markup=main_menu_keyboard())
 
     except Exception as e:
