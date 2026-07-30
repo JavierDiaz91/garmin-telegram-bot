@@ -3,9 +3,13 @@ import zoneinfo
 import os
 import logging
 import threading
+import urllib.parse
+import json
+import base64
 import httpx
 from flask import Flask
 from groq import Groq
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -29,6 +33,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
 ATHLETE_ID = os.getenv("ATHLETE_ID")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+MY_CHAT_ID = os.getenv("CHAT_ID")
 
 TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -36,9 +41,31 @@ groq_client = None
 if GROQ_API_KEY:
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
-        logging.info("Cliente de Groq (Llama 3.3) inicializado correctamente.")
+        logging.info("Cliente de Groq inicializado correctamente.")
     except Exception as e:
         logging.error(f"Error al inicializar cliente de Groq: {e}")
+
+# Base de datos local simulada para Zapatillas
+SHOES_DB_FILE = "zapatillas.json"
+
+def cargar_zapatillas():
+    if os.path.exists(SHOES_DB_FILE):
+        try:
+            with open(SHOES_DB_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "Pistas / Carbono": {"km": 120.0, "max_km": 400.0, "modelo": "Nike Vaporfly / Alphafly"},
+        "Entreno Diario": {"km": 380.0, "max_km": 700.0, "modelo": "Kiprun / Pegasus"}
+    }
+
+def guardar_zapatillas(data):
+    try:
+        with open(SHOES_DB_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        logging.error(f"Error guardando zapatillas: {e}")
 
 # ----------------------------------------------------------------------
 # 2. WEBSERVER FLASK
@@ -58,7 +85,7 @@ def run_web_server():
         logging.error(f"Error al iniciar servidor Flask: {e}")
 
 # ----------------------------------------------------------------------
-# 3. CLIENTE ASÍNCRONO DE INTERVALS.ICU
+# 3. CLIENTE ASÍNCRONO DE INTERVALS.ICU Y CLIMA
 # ----------------------------------------------------------------------
 async def fetch_intervals_data(endpoint: str, params: dict = None):
     if not INTERVALS_API_KEY or not ATHLETE_ID:
@@ -77,12 +104,78 @@ async def fetch_intervals_data(endpoint: str, params: dict = None):
         logging.error(f"Error consultando {endpoint}: {e}")
         return None, "⚠️ Error de conexión con Intervals.icu."
 
+async def obtener_clima_rafaela():
+    """Consulta clima público para Rafaela, Santa Fe."""
+    try:
+        url = "https://api.open-meteo.com/v1/forecast?latitude=-31.2503&longitude=-61.4867&current_weather=true&timezone=America%2FArgentina%2FBuenos_Aires"
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(url)
+            if res.status_code == 200:
+                data = res.json().get("current_weather", {})
+                temp = data.get("temperature", "N/D")
+                wind = data.get("windspeed", "N/D")
+                return f"🌡️ `{temp}°C` | 💨 Viento: `{wind} km/h`"
+    except Exception as e:
+        logging.error(f"Error consultando clima: {e}")
+    return "🌡️ Clima no disponible"
+
 # ----------------------------------------------------------------------
-# 4. FUNCIONES EXTRAORDINARIAS DE BIOMECÁNICA Y MÉTRICAS
+# 4. GENERADOR DE GRÁFICOS (QUICKCHART.IO)
+# ----------------------------------------------------------------------
+def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
+    """Genera una imagen PNG con la gráfica PMC (Fitness vs Fatiga vs Forma)."""
+    chart_config = {
+        "type": "line",
+        "data": {
+            "labels": fechas,
+            "datasets": [
+                {
+                    "label": "Fitness (CTL)",
+                    "borderColor": "#2196F3",
+                    "backgroundColor": "#2196F3",
+                    "data": ctl,
+                    "fill": False,
+                    "borderWidth": 2,
+                    "pointRadius": 0
+                },
+                {
+                    "label": "Fatiga (ATL)",
+                    "borderColor": "#FF9800",
+                    "backgroundColor": "#FF9800",
+                    "data": atl,
+                    "fill": False,
+                    "borderWidth": 2,
+                    "pointRadius": 0
+                },
+                {
+                    "label": "Forma (TSB)",
+                    "borderColor": "#4CAF50",
+                    "backgroundColor": "rgba(76, 175, 80, 0.2)",
+                    "data": tsb,
+                    "fill": True,
+                    "borderWidth": 1.5,
+                    "pointRadius": 0
+                }
+            ]
+        },
+        "options": {
+            "title": {"display": True, "text": "Performance Management Chart (Últimos 14 días)", "fontColor": "#ffffff"},
+            "legend": {"labels": {"fontColor": "#ffffff"}},
+            "scales": {
+                "xAxes": [{"ticks": {"fontColor": "#cccccc"}}],
+                "yAxes": [{"ticks": {"fontColor": "#cccccc"}}]
+            }
+        }
+    }
+    
+    encoded_config = urllib.parse.quote(json.dumps(chart_config))
+    return f"https://quickchart.io/chart?c={encoded_config}&bkg=%231e1e1e&w=600&h=320"
+
+# ----------------------------------------------------------------------
+# 5. FUNCIONES DE MÉRICA Y REPORTE
 # ----------------------------------------------------------------------
 
 async def obtener_dinamicas_biomecanica():
-    """Extrae métricas avanzadas de running: cadencia, zancada, oscilación, GCT, VO2Max, etc."""
     actividades, err = await fetch_intervals_data("activities", {"limit": 3})
 
     if err or not actividades:
@@ -92,7 +185,6 @@ async def obtener_dinamicas_biomecanica():
     nombre = act.get("name", "Entrenamiento")
     fecha = act.get("start_date_local", "")[:10]
     
-    # Biomecánica y Dinámicas de Carrera (redondeo limpio)
     cadencia_raw = act.get("average_cadence")
     cadencia = int(round(cadencia_raw)) if isinstance(cadencia_raw, (int, float)) else "N/D"
     
@@ -102,7 +194,6 @@ async def obtener_dinamicas_biomecanica():
     osc_vert = round(act.get("vertical_oscillation", 0), 1) if act.get("vertical_oscillation") else "N/D"
     rel_vert = round(act.get("vertical_ratio", 0), 1) if act.get("vertical_ratio") else "N/D"
 
-    # Fisiología y Carga Avanzada
     vo2max = act.get("icu_vo2max") or act.get("vo2max", "N/D")
     te_aero = act.get("aerobic_training_effect", "N/D")
     te_anaero = act.get("anaerobic_training_effect", "N/D")
@@ -166,39 +257,77 @@ async def obtener_salud_sueno():
         f"• ❤️ *FC en Reposo:* `{rhr_a} ppm`"
     )
 
-async def obtener_carga_trabajo():
-    today_str = datetime.datetime.now(TZ_AR).strftime("%Y-%m-%d")
-    wellness, err = await fetch_intervals_data(f"wellness/{today_str}")
+async def obtener_carga_trabajo_con_grafico():
+    now = datetime.datetime.now(TZ_AR)
+    today_str = now.strftime("%Y-%m-%d")
+    oldest_str = (now - datetime.timedelta(days=14)).strftime("%Y-%m-%d")
 
-    if err or not wellness:
-        return "⚠️ Sin datos de carga disponibles para hoy."
+    wellness_list, err = await fetch_intervals_data("wellness", {"oldest": oldest_str, "newest": today_str})
 
-    ctl = round(wellness.get("ctl", 0), 1) if wellness.get("ctl") else "N/D"
-    atl = round(wellness.get("atl", 0), 1) if wellness.get("atl") else "N/D"
-    tsb = round(ctl - atl, 1) if isinstance(ctl, (int, float)) and isinstance(atl, (int, float)) else "N/D"
+    if err or not wellness_list:
+        return "⚠️ Sin datos de carga disponibles.", None
 
-    if isinstance(tsb, (int, float)):
-        if tsb > 10:
+    fechas, ctl_list, atl_list, tsb_list = [], [], [], []
+
+    for item in wellness_list:
+        if isinstance(item, dict):
+            fechas.append(item.get("id", "")[5:]) # MM-DD
+            c = round(item.get("ctl", 0), 1) if item.get("ctl") else 0
+            a = round(item.get("atl", 0), 1) if item.get("atl") else 0
+            ctl_list.append(c)
+            atl_list.append(a)
+            tsb_list.append(round(c - a, 1))
+
+    ctl_actual = ctl_list[-1] if ctl_list else "N/D"
+    atl_actual = atl_list[-1] if atl_list else "N/D"
+    tsb_actual = tsb_list[-1] if tsb_list else "N/D"
+
+    if isinstance(tsb_actual, (int, float)):
+        if tsb_actual > 10:
             estado_tsb = "🟢 FRESCO / RECUPERADO"
-        elif -10 <= tsb <= 10:
+        elif -10 <= tsb_actual <= 10:
             estado_tsb = "🔵 ZONA NEUTRA / MANTENIMIENTO"
-        elif -30 <= tsb < -10:
+        elif -30 <= tsb_actual < -10:
             estado_tsb = "🟠 ZONA DE SOBRECARGA ÓPTIMA"
         else:
             estado_tsb = "🔴 RIESGO DE FATIGA EXTREMA"
     else:
         estado_tsb = "⚪ SIN DATOS"
 
-    return (
+    url_chart = generar_url_grafico_pmc(fechas, ctl_list, atl_list, tsb_list)
+
+    texto = (
         f"📈 *ESTADO DE CARGA Y FORMA (CTL / ATL / TSB)*\n"
         f"📅 Fecha: `{today_str}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🛡️ *Fitness (CTL):* `{ctl}` _(Últimos 42 días)_\n"
-        f"🔥 *Fatiga (ATL):* `{atl}` _(Últimos 7 días)_\n"
-        f"⚖️ *Forma / TSB:* `{tsb}`\n\n"
-        f"🎯 *DIAGNOSTICO RÁPIDO:*\n"
+        f"🛡️ *Fitness (CTL):* `{ctl_actual}` _(Últimos 42 días)_\n"
+        f"🔥 *Fatiga (ATL):* `{atl_actual}` _(Últimos 7 días)_\n"
+        f"⚖️ *Forma / TSB:* `{tsb_actual}`\n\n"
+        f"🎯 *DIAGNÓSTICO RÁPIDO:*\n"
         f"└ {estado_tsb}"
     )
+
+    return texto, url_chart
+
+async def obtener_estado_zapatillas():
+    zapas = cargar_zapatillas()
+    lineas = ["👟 *ESTADO Y KILOMETRAJE DE ZAPATILLAS*", "━━━━━━━━━━━━━━━━━━━━━━━\n"]
+
+    for nombre, info in zapas.items():
+        km = info.get("km", 0)
+        max_km = info.get("max_km", 600)
+        pct = min(100, int((km / max_km) * 100))
+        bar_filled = "█" * (pct // 10)
+        bar_empty = "░" * (10 - (pct // 10))
+        alerta = " ⚠️ *RECAMBIO SUGERIDO*" if pct >= 85 else ""
+
+        lineas.append(
+            f"📌 *{nombre}* ({info.get('modelo', '')})\n"
+            f"  ├ 📏 `{km:.1f} km` / `{max_km:.0f} km` ({pct}%)\n"
+            f"  └ `[{bar_filled}{bar_empty}]`{alerta}\n"
+        )
+
+    return "\n".join(lineas)
 
 async def obtener_historial_actividades(dias: int = 7):
     now = datetime.datetime.now(TZ_AR)
@@ -261,7 +390,35 @@ async def obtener_diagnostico_completo(dias_historia: int = 7):
     )
 
 # ----------------------------------------------------------------------
-# 5. MENÚ Y BOTONES INTERACTIVOS
+# 6. MORNING BRIEFING AUTOMÁTICO
+# ----------------------------------------------------------------------
+async def enviar_morning_briefing(app):
+    """Tarea programada que envía un informe diario proactivo a las 07:30 AM."""
+    if not MY_CHAT_ID:
+        logging.warning("No se ejecutó Morning Briefing: falta MY_CHAT_ID en variables de entorno.")
+        return
+
+    salud = await obtener_salud_sueno()
+    clima = await obtener_clima_rafaela()
+    carga, _ = await obtener_carga_trabajo_con_grafico()
+
+    texto_briefing = (
+        f"🌅 *MORNING BRIEFING - ALTO RENDIMIENTO*\n"
+        f"📍 Rafaela, Santa Fe | {clima}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{salud}\n\n"
+        f"{carga}\n\n"
+        f"💡 *CONSEJO DEL DÍA:* Ajustá la hidratación según la temperatura local y recordá revisar la cadencia objetivo en las pasadas de hoy."
+    )
+
+    try:
+        await app.bot.send_message(chat_id=MY_CHAT_ID, text=texto_briefing, parse_mode="Markdown")
+        logging.info("Morning Briefing enviado con éxito.")
+    except Exception as e:
+        logging.error(f"Error enviando Morning Briefing: {e}")
+
+# ----------------------------------------------------------------------
+# 7. MENÚ Y BOTONES INTERACTIVOS
 # ----------------------------------------------------------------------
 def main_menu_keyboard():
     keyboard = [
@@ -271,10 +428,10 @@ def main_menu_keyboard():
             InlineKeyboardButton("🦶 Biomecánica & Cadencia", callback_data="biomecanica")
         ],
         [
-            InlineKeyboardButton("📈 Carga (CTL/ATL)", callback_data="carga"),
+            InlineKeyboardButton("📈 Carga & Gráfico PMC", callback_data="carga"),
             InlineKeyboardButton("🫀 Sueño & HRV", callback_data="salud_sueno")
         ],
-        [InlineKeyboardButton("🔋 Recuperación e Hidratación", callback_data="recuperacion_gasto")],
+        [InlineKeyboardButton("👟 Kilometraje Zapatillas", callback_data="zapatillas")],
         [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_principal")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -283,8 +440,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "🚀 *¡HOLA JAVII! CENTRO DE ALTO RENDIMIENTO DEPORTIVO*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "• Toca cualquier botón para ver métricas precisas al instante.\n"
-        "• O escribime en texto libre (ej: *'¿Cómo fue mi cadencia el lunes?'* o *'Analizá mis dinámicas de carrera'*)."
+        "• Tocá cualquier botón para consultar métricas o ver tu gráfico PMC.\n"
+        "• Mandame una *foto o captura* de tu reloj/entrenamiento y la analizaré con Visión por IA.\n"
+        "• O escribime en texto libre para analizar cualquier aspecto de tu rendimiento."
     )
     await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
@@ -304,13 +462,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     elif data == "carga":
-        await query.edit_message_text("🔍 *Calculando modelo de impulso-respuesta...*", parse_mode="Markdown")
-        res = await obtener_carga_trabajo()
-        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await query.edit_message_text("🔍 *Generando modelo PMC y gráfico...*", parse_mode="Markdown")
+        res_texto, url_chart = await obtener_carga_trabajo_con_grafico()
+        
+        if url_chart:
+            await query.message.reply_photo(
+                photo=url_chart,
+                caption=res_texto,
+                parse_mode="Markdown",
+                reply_markup=main_menu_keyboard()
+            )
+        else:
+            await query.edit_message_text(res_texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
-    elif data == "recuperacion_gasto":
-        await query.edit_message_text("🔍 *Analizando hidratación y gasto calórico...*", parse_mode="Markdown")
-        await query.edit_message_text("🔋 *Cálculo de recuperación disponible en texto con IA.*", parse_mode="Markdown", reply_markup=main_menu_keyboard())
+    elif data == "zapatillas":
+        await query.edit_message_text("🔍 *Verificando desgaste de calzado...*", parse_mode="Markdown")
+        res = await obtener_estado_zapatillas()
+        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     elif data == "entrenamiento_hoy":
         await query.edit_message_text("🔍 *Buscando entrenamientos de hoy...*", parse_mode="Markdown")
@@ -327,7 +495,65 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
 # ----------------------------------------------------------------------
-# 6. MANEJADOR CON IA (GROQ LLAMA 3.3 70B)
+# 8. MANEJADOR DE IMÁGENES CON VISIÓN POR IA (LLAMA 3.2 VISION)
+# ----------------------------------------------------------------------
+async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not groq_client:
+        await update.message.reply_text("⚠️ *La IA no está configurada.* Falta `GROQ_API_KEY`.", parse_mode="Markdown")
+        return
+
+    thinking_msg = await update.message.reply_text("👁️ *Javii, analizando la foto de tu entrenamiento...*", parse_mode="Markdown")
+
+    try:
+        # Descargar la foto enviada en la mayor resolución
+        photo_file = await update.message.photo[-1].get_file()
+        photo_bytes = await photo_file.download_as_bytearray()
+        base64_image = base64.b64encode(photo_bytes).decode('utf-8')
+
+        contexto = await obtener_diagnostico_completo(dias_historia=3)
+
+        system_prompt = (
+            "Sos un fisiólogo deportivo y especialista en biomecánica con visión por computadora.\n"
+            "REGLA DE SEGURIDAD ABSOLUTA: Solo debes procesar imágenes que correspondan a ENTRENAMIENTOS, RELOJES DEPORTIVOS, APPS DE RUNNING/CICLISMO, PANTALLAS DE CINTAS O TABLAS DE MÉTRICAS.\n"
+            "Si la imagen NO es de un entrenamiento (ej: una selfi, paisaje sin datos, comida, mascota), responde educadamente: '⚠️ Javii, solo puedo interpretar imágenes referidas a tus entrenamientos o pantallas de reloj deportivo.'\n\n"
+            "FORMATO DE RESPUESTA TELEGRAM:\n"
+            "1. PROHIBIDO usar caracteres como '##', '###', '=='. Usa solo negritas (*texto*) y emojis.\n"
+            "2. Extrae las métricas de la foto (ritmo, cadencia, distancia, FC, etc.) y compáralas brevemente con su contexto reciente de Intervals.icu.\n"
+            "3. Redondeá la cadencia a números enteros sin decimales."
+        )
+
+        user_content = [
+            {
+                "type": "text",
+                "text": f"DATOS RECIENTES DE INTERVALS.ICU:\n{contexto}\n\nPor favor analiza esta foto de mi entrenamiento."
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
+            }
+        ]
+
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            model="llama-3.2-11b-vision-preview",
+            temperature=0.2,
+            max_tokens=1000
+        )
+
+        respuesta_ai = chat_completion.choices[0].message.content
+        await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+    except Exception as e:
+        logging.error(f"Error procesando imagen con Groq Vision: {e}")
+        await thinking_msg.edit_text(f"❌ *Error al analizar la imagen:* `{e}`", parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+# ----------------------------------------------------------------------
+# 9. MANEJADOR DE TEXTO CON IA (GROQ LLAMA 3.3 70B)
 # ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
@@ -341,18 +567,17 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         contexto = await obtener_diagnostico_completo(dias_historia=7)
 
-        # PROMPT OPTIMIZADO PARA TELEGRAM (SIN ALMOHADILLAS ## O ===)
         system_instruction = (
             "Sos un fisiólogo del deporte, biomecánico experto en atletismo y coach de alto rendimiento.\n"
             "Tu rol es analizar los datos biomecánicos y de carga de Javii.\n\n"
             "REGLAS CRÍTICAS DE FORMATO PARA TELEGRAM:\n"
-            "1. PROHIBIDO usar caracteres como '##', '###', '==' o '--'. Telegram NO soporta esos encabezados y se ven feos.\n"
-            "2. Usa ÚNICAMENTE negritas (*texto*), viñetas con emojis o guiones para estructurar el mensaje.\n"
-            "3. Redondeá siempre la cadencia a números enteros (ej. '79 ppm' en lugar de '79.45539 ppm').\n"
+            "1. PROHIBIDO usar caracteres como '##', '###', '==' o '--'.\n"
+            "2. Usa ÚNICAMENTE negritas (*texto*), viñetas con emojis o guiones.\n"
+            "3. Redondeá siempre la cadencia a números enteros (ej. '79 ppm').\n"
             "4. Dirigite al atleta como Javii.\n\n"
             "ESTRUCTURA DE TU RESPUESTA:\n"
             "• Saludo breve a Javii.\n"
-            "• 📊 *Diagnóstico de Métricas Clave*: Datos numéricos precisos y redondeados del entreno.\n"
+            "• 📊 *Diagnóstico de Métricas Clave*: Datos numéricos precisos del entreno.\n"
             "• 🔬 *Explicación Fisiológica / Biomecánica*: Análisis claro de eficiencia o fatiga.\n"
             "• 💡 *Pauta para el Próximo Entreno*: Consejo o sugerencia práctica accionable."
         )
@@ -377,7 +602,6 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
         except Exception:
-            # Fallback si falla el parseo de Markdown
             await thinking_msg.edit_text(respuesta_ai, reply_markup=main_menu_keyboard())
 
     except Exception as e:
@@ -385,7 +609,7 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await thinking_msg.edit_text(f"❌ *Error al procesar:* `{e}`", parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
 # ----------------------------------------------------------------------
-# 7. ARRANQUE DEL BOT
+# 10. ARRANQUE DEL BOT Y PLANIFICADOR
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
     if not BOT_TOKEN:
@@ -394,9 +618,21 @@ if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
+
+    # Planificador APScheduler para el Morning Briefing (07:30 AM Argentina)
+    scheduler = AsyncIOScheduler(timezone="America/Argentina/Buenos_Aires")
+    scheduler.add_job(
+        enviar_morning_briefing,
+        trigger="cron",
+        hour=7,
+        minute=30,
+        args=[app]
+    )
+    scheduler.start()
+
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_user_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_text))
 
     logging.info("Bot de Rendimiento en ejecución...")
