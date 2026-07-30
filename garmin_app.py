@@ -33,7 +33,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 INTERVALS_API_KEY = os.getenv("INTERVALS_API_KEY")
 ATHLETE_ID = os.getenv("ATHLETE_ID")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-MY_CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = os.getenv("CHAT_ID") or os.getenv("MY_CHAT_ID")
 
 TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -45,7 +45,7 @@ if GROQ_API_KEY:
     except Exception as e:
         logging.error(f"Error al inicializar cliente de Groq: {e}")
 
-# Base de datos local simulada para Zapatillas
+# Base de datos local para Zapatillas
 SHOES_DB_FILE = "zapatillas.json"
 
 def cargar_zapatillas():
@@ -59,13 +59,6 @@ def cargar_zapatillas():
         "Pistas / Carbono": {"km": 120.0, "max_km": 400.0, "modelo": "Nike Vaporfly / Alphafly"},
         "Entreno Diario": {"km": 380.0, "max_km": 700.0, "modelo": "Kiprun / Pegasus"}
     }
-
-def guardar_zapatillas(data):
-    try:
-        with open(SHOES_DB_FILE, "w") as f:
-            json.dump(data, f, indent=4)
-    except Exception as e:
-        logging.error(f"Error guardando zapatillas: {e}")
 
 # ----------------------------------------------------------------------
 # 2. WEBSERVER FLASK
@@ -105,7 +98,6 @@ async def fetch_intervals_data(endpoint: str, params: dict = None):
         return None, "⚠️ Error de conexión con Intervals.icu."
 
 async def obtener_clima_rafaela():
-    """Consulta clima público para Rafaela, Santa Fe."""
     try:
         url = "https://api.open-meteo.com/v1/forecast?latitude=-31.2503&longitude=-61.4867&current_weather=true&timezone=America%2FArgentina%2FBuenos_Aires"
         async with httpx.AsyncClient(timeout=8.0) as client:
@@ -123,7 +115,6 @@ async def obtener_clima_rafaela():
 # 4. GENERADOR DE GRÁFICOS (QUICKCHART.IO)
 # ----------------------------------------------------------------------
 def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
-    """Genera una imagen PNG con la gráfica PMC (Fitness vs Fatiga vs Forma)."""
     chart_config = {
         "type": "line",
         "data": {
@@ -159,7 +150,7 @@ def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
             ]
         },
         "options": {
-            "title": {"display": True, "text": "Performance Management Chart (Últimos 14 días)", "fontColor": "#ffffff"},
+            "title": {"display": True, "text": "PMC - Carga de Entrenamiento", "fontColor": "#ffffff"},
             "legend": {"labels": {"fontColor": "#ffffff"}},
             "scales": {
                 "xAxes": [{"ticks": {"fontColor": "#cccccc"}}],
@@ -172,7 +163,7 @@ def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
     return f"https://quickchart.io/chart?c={encoded_config}&bkg=%231e1e1e&w=600&h=320"
 
 # ----------------------------------------------------------------------
-# 5. FUNCIONES DE MÉRICA Y REPORTE
+# 5. FUNCIONES DE MÉTRICAS
 # ----------------------------------------------------------------------
 
 async def obtener_dinamicas_biomecanica():
@@ -271,7 +262,7 @@ async def obtener_carga_trabajo_con_grafico():
 
     for item in wellness_list:
         if isinstance(item, dict):
-            fechas.append(item.get("id", "")[5:]) # MM-DD
+            fechas.append(item.get("id", "")[5:])
             c = round(item.get("ctl", 0), 1) if item.get("ctl") else 0
             a = round(item.get("atl", 0), 1) if item.get("atl") else 0
             ctl_list.append(c)
@@ -294,7 +285,7 @@ async def obtener_carga_trabajo_con_grafico():
     else:
         estado_tsb = "⚪ SIN DATOS"
 
-    url_chart = generar_url_grafico_pmc(fechas, ctl_list, atl_list, tsb_list)
+    url_chart = generar_url_grafico_pmc(fechas, ctl_list, atl_list, tsb_list) if fechas else None
 
     texto = (
         f"📈 *ESTADO DE CARGA Y FORMA (CTL / ATL / TSB)*\n"
@@ -390,12 +381,11 @@ async def obtener_diagnostico_completo(dias_historia: int = 7):
     )
 
 # ----------------------------------------------------------------------
-# 6. MORNING BRIEFING AUTOMÁTICO
+# 6. MORNING BRIEFING
 # ----------------------------------------------------------------------
-async def enviar_morning_briefing(app):
-    """Tarea programada que envía un informe diario proactivo a las 07:30 AM."""
-    if not MY_CHAT_ID:
-        logging.warning("No se ejecutó Morning Briefing: falta MY_CHAT_ID en variables de entorno.")
+async def enviar_morning_briefing(context: ContextTypes.DEFAULT_TYPE):
+    if not CHAT_ID:
+        logging.warning("No se ejecutó Morning Briefing: falta CHAT_ID en variables de entorno.")
         return
 
     salud = await obtener_salud_sueno()
@@ -408,11 +398,11 @@ async def enviar_morning_briefing(app):
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{salud}\n\n"
         f"{carga}\n\n"
-        f"💡 *CONSEJO DEL DÍA:* Ajustá la hidratación según la temperatura local y recordá revisar la cadencia objetivo en las pasadas de hoy."
+        f"💡 *CONSEJO DEL DÍA:* Revisa tus zonas de FC y mantendé una hidratación adecuada."
     )
 
     try:
-        await app.bot.send_message(chat_id=MY_CHAT_ID, text=texto_briefing, parse_mode="Markdown")
+        await context.bot.send_message(chat_id=CHAT_ID, text=texto_briefing, parse_mode="Markdown")
         logging.info("Morning Briefing enviado con éxito.")
     except Exception as e:
         logging.error(f"Error enviando Morning Briefing: {e}")
@@ -441,8 +431,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚀 *¡HOLA JAVII! CENTRO DE ALTO RENDIMIENTO DEPORTIVO*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "• Tocá cualquier botón para consultar métricas o ver tu gráfico PMC.\n"
-        "• Mandame una *foto o captura* de tu reloj/entrenamiento y la analizaré con Visión por IA.\n"
-        "• O escribime en texto libre para analizar cualquier aspecto de tu rendimiento."
+        "• Mandame una *foto o captura* de tu entrenamiento para verla con Visión por IA.\n"
+        "• O escribime en texto libre tu consulta."
     )
     await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
@@ -495,7 +485,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
 # ----------------------------------------------------------------------
-# 8. MANEJADOR DE IMÁGENES CON VISIÓN POR IA (LLAMA 3.2 VISION)
+# 8. MANEJADOR DE IMÁGENES CON IA (VISIÓN)
 # ----------------------------------------------------------------------
 async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not groq_client:
@@ -505,7 +495,6 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     thinking_msg = await update.message.reply_text("👁️ *Javii, analizando la foto de tu entrenamiento...*", parse_mode="Markdown")
 
     try:
-        # Descargar la foto enviada en la mayor resolución
         photo_file = await update.message.photo[-1].get_file()
         photo_bytes = await photo_file.download_as_bytearray()
         base64_image = base64.b64encode(photo_bytes).decode('utf-8')
@@ -514,18 +503,17 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         system_prompt = (
             "Sos un fisiólogo deportivo y especialista en biomecánica con visión por computadora.\n"
-            "REGLA DE SEGURIDAD ABSOLUTA: Solo debes procesar imágenes que correspondan a ENTRENAMIENTOS, RELOJES DEPORTIVOS, APPS DE RUNNING/CICLISMO, PANTALLAS DE CINTAS O TABLAS DE MÉTRICAS.\n"
-            "Si la imagen NO es de un entrenamiento (ej: una selfi, paisaje sin datos, comida, mascota), responde educadamente: '⚠️ Javii, solo puedo interpretar imágenes referidas a tus entrenamientos o pantallas de reloj deportivo.'\n\n"
-            "FORMATO DE RESPUESTA TELEGRAM:\n"
-            "1. PROHIBIDO usar caracteres como '##', '###', '=='. Usa solo negritas (*texto*) y emojis.\n"
-            "2. Extrae las métricas de la foto (ritmo, cadencia, distancia, FC, etc.) y compáralas brevemente con su contexto reciente de Intervals.icu.\n"
-            "3. Redondeá la cadencia a números enteros sin decimales."
+            "REGLA ABSOLUTA: Solo procesa imágenes que correspondan a ENTRENAMIENTOS, RELOJES DEPORTIVOS, APPS DE RUNNING O TABLAS DE MÉTRICAS.\n"
+            "Si la imagen NO es de entrenamiento, responde: '⚠️ Javii, solo puedo interpretar imágenes referidas a tus entrenamientos o relojes deportivos.'\n\n"
+            "FORMATO:\n"
+            "1. PROHIBIDO usar '##', '###' o '=='. Usa negritas (*texto*) y emojis.\n"
+            "2. Extrae las métricas visibles y analízalas."
         )
 
         user_content = [
             {
                 "type": "text",
-                "text": f"DATOS RECIENTES DE INTERVALS.ICU:\n{contexto}\n\nPor favor analiza esta foto de mi entrenamiento."
+                "text": f"DATOS RECIENTES:\n{contexto}\n\nAnaliza la foto de mi entrenamiento."
             },
             {
                 "type": "image_url",
@@ -549,11 +537,11 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await thinking_msg.edit_text(respuesta_ai, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     except Exception as e:
-        logging.error(f"Error procesando imagen con Groq Vision: {e}")
+        logging.error(f"Error procesando imagen: {e}")
         await thinking_msg.edit_text(f"❌ *Error al analizar la imagen:* `{e}`", parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
 # ----------------------------------------------------------------------
-# 9. MANEJADOR DE TEXTO CON IA (GROQ LLAMA 3.3 70B)
+# 9. MANEJADOR DE TEXTO CON IA
 # ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
@@ -609,26 +597,29 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await thinking_msg.edit_text(f"❌ *Error al procesar:* `{e}`", parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
 # ----------------------------------------------------------------------
-# 10. ARRANQUE DEL BOT Y PLANIFICADOR
+# 10. INICIALIZACIÓN DE TAREAS Y ARRANQUE
 # ----------------------------------------------------------------------
+async def post_init(application):
+    """Inicializa la tarea programada una vez que la app levantó correctamente."""
+    if CHAT_ID:
+        scheduler = AsyncIOScheduler(timezone="America/Argentina/Buenos_Aires")
+        scheduler.add_job(
+            enviar_morning_briefing,
+            trigger="cron",
+            hour=7,
+            minute=30,
+            args=[application]
+        )
+        scheduler.start()
+        logging.info("Planificador Morning Briefing activo (07:30 AM AR).")
+
 if __name__ == "__main__":
     if not BOT_TOKEN:
         raise ValueError("Error: Falta BOT_TOKEN.")
 
     threading.Thread(target=run_web_server, daemon=True).start()
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    # Planificador APScheduler para el Morning Briefing (07:30 AM Argentina)
-    scheduler = AsyncIOScheduler(timezone="America/Argentina/Buenos_Aires")
-    scheduler.add_job(
-        enviar_morning_briefing,
-        trigger="cron",
-        hour=7,
-        minute=30,
-        args=[app]
-    )
-    scheduler.start()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_handler))
