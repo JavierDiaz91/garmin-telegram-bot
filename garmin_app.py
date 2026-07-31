@@ -422,19 +422,22 @@ async def enviar_morning_briefing(context: ContextTypes.DEFAULT_TYPE):
 def main_menu_keyboard():
     keyboard = [
         [
-            InlineKeyboardButton("🏃 Entreno Hoy", callback_data="btn_entreno_hoy"),
-            InlineKeyboardButton("📈 PMC & Carga", callback_data="btn_pmc")
+            InlineKeyboardButton("🏃 Entreno Hoy", callback_data="entrenamiento_hoy"),
+            InlineKeyboardButton("📈 PMC & Carga", callback_data="carga")
         ],
         [
-            InlineKeyboardButton("🦶 Biomecánica", callback_data="btn_biomecanica"),
-            InlineKeyboardButton("🩺 Sueño & HRV", callback_data="btn_sueno_hrv")
+            InlineKeyboardButton("🦶 Biomecánica", callback_data="biomecanica"),
+            InlineKeyboardButton("🩺 Sueño & HRV", callback_data="salud_sueno")
         ],
         [
-            InlineKeyboardButton("👟 Zapatillas", callback_data="btn_zapatillas"),
-            InlineKeyboardButton("🌤️ Clima Entreno", callback_data="btn_clima")
+            InlineKeyboardButton("👟 Zapatillas", callback_data="zapatillas"),
+            InlineKeyboardButton("🌤️ Clima Entreno", callback_data="clima")
         ],
         [
-            InlineKeyboardButton("⚡ Diagnóstico", callback_data="btn_diagnostico_ia")
+            InlineKeyboardButton("⚡ Diagnóstico IA", callback_data="diagnostico_completo")
+        ],
+        [
+            InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_principal")
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
