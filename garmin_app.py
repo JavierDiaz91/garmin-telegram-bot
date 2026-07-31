@@ -505,21 +505,46 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
+    # Helper para responder sin romper el bot si el mensaje anterior era una foto
+    async def responder_o_editar(texto_res, markup=None):
+        try:
+            if query.message.photo:
+                # Si el mensaje actual es una foto, enviamos un mensaje de texto nuevo limpio
+                await query.message.reply_text(
+                    texto_res, 
+                    parse_mode="Markdown", 
+                    reply_markup=markup
+                )
+            else:
+                # Si era texto normal, lo editamos directo
+                await query.edit_message_text(
+                    texto_res, 
+                    parse_mode="Markdown", 
+                    reply_markup=markup
+                )
+        except Exception as e:
+            # Fallback en caso de cualquier inconsistencia de Telegram
+            await query.message.reply_text(
+                texto_res, 
+                parse_mode="Markdown", 
+                reply_markup=markup
+            )
+
+    # --- HANDLERS DE CADA BOTÓN ---
+
     if data == "biomecanica":
-        await query.edit_message_text("🔍 *Escaneando cadencia, zancada y oscilación...*", parse_mode="Markdown")
         res = await obtener_dinamicas_biomecanica()
-        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await responder_o_editar(res, main_menu_keyboard())
 
     elif data == "salud_sueno":
-        await query.edit_message_text("🔍 *Recuperando métricas de sueño y VFC...*", parse_mode="Markdown")
         res = await obtener_salud_sueno()
-        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await responder_o_editar(res, main_menu_keyboard())
 
     elif data == "carga":
-        await query.edit_message_text("🔍 *Generando modelo PMC y gráfico...*", parse_mode="Markdown")
         res_texto, url_chart = await obtener_carga_trabajo_con_grafico()
         
         if url_chart:
+            # Enviamos la foto con su botonera
             await query.message.reply_photo(
                 photo=url_chart,
                 caption=res_texto,
@@ -527,32 +552,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=main_menu_keyboard()
             )
         else:
-            await query.edit_message_text(res_texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+            await responder_o_editar(res_texto, main_menu_keyboard())
 
     elif data == "zapatillas":
-        await query.edit_message_text("🔍 *Verificando desgaste de calzado...*", parse_mode="Markdown")
         res = await obtener_estado_zapatillas()
-        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await responder_o_editar(res, main_menu_keyboard())
 
     elif data == "clima":
-        await query.edit_message_text("🔍 *Consultando clima actual de Rafaela...*", parse_mode="Markdown")
-        res = await obtener_clima_rafaela()
-        texto_clima = f"🌤️ *CONDICIONES PARA ENTRENAR EN RAFAELA*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n{res}"
-        await query.edit_message_text(texto_clima, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        res = await obtener_clima_ciudad("Rafaela")
+        await responder_o_editar(res, main_menu_keyboard())
 
     elif data == "entrenamiento_hoy":
-        await query.edit_message_text("🔍 *Buscando entrenamientos de hoy...*", parse_mode="Markdown")
         res = await obtener_historial_actividades(dias=1)
-        await query.edit_message_text(f"🏃 *ENTRENAMIENTO DE HOY:*\n\n{res}", parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await responder_o_editar(f"🏃 *ENTRENAMIENTO DE HOY:*\n\n{res}", main_menu_keyboard())
 
     elif data == "diagnostico_completo":
-        await query.edit_message_text("🔍 *Procesando diagnóstico integrado...*", parse_mode="Markdown")
         res = await obtener_diagnostico_completo(dias_historia=7)
-        await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await responder_o_editar(res, main_menu_keyboard())
 
     elif data == "menu_principal":
         texto = "🏠 *MENÚ PRINCIPAL DE RENDIMIENTO*\n\nElegí una opción o escribime directamente tu consulta:"
-        await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await responder_o_editar(texto, main_menu_keyboard())
 
 # ----------------------------------------------------------------------
 # 8. MANEJADOR DE IMÁGENES CON IA (VISIÓN)
