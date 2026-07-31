@@ -403,7 +403,7 @@ async def obtener_diagnostico_completo(dias_historia: int = 7):
     biomecanica = await obtener_dinamicas_biomecanica()
 
     return (
-        f"📌 FECHA SERVIDOR: {today_str}\n\n"
+        f"📌 REGISTROS ANTERIORES: {today_str}\n\n"
         f"📊 SALUD Y CARGA HISTÓRICA ({dias_historia} DÍAS):\n{texto_wellness}\n\n"
         f"🏃 ACTIVIDADES COMPLETADAS ({dias_historia} DÍAS):\n{texto_actividades}\n\n"
         f"🧬 ÚLTIMAS DINÁMICAS BIOMECÁNICAS REGISTRADAS:\n{biomecanica}"
@@ -482,7 +482,7 @@ def main_menu_keyboard():
             InlineKeyboardButton("🌤️ Clima Entreno", callback_data="clima")
         ],
         [
-            InlineKeyboardButton("⚡ Diagnóstico IA", callback_data="diagnostico_completo")
+            InlineKeyboardButton("⚡ Diagnóstico Integrado", callback_data="diagnostico_completo")
         ],
         [
             InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_principal")
