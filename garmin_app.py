@@ -6,6 +6,7 @@ import threading
 import urllib.parse
 import json
 import base64
+import aiohttp
 import httpx
 from flask import Flask
 from groq import Groq
@@ -610,36 +611,59 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await thinking_msg.edit_text(f"❌ *Error al analizar la imagen:* `{e}`", parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
 
-async def obtener_clima_actual():
-    # Coordenadas de Rafaela, Santa Fe (-31.25, -61.48)
-    url = "https://api.open-meteo.com/v1/forecast?latitude=-31.25&longitude=-61.48&current_weather=true&hourly=relativehumidity_2m"
+async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
+    # 1. Buscamos las coordenadas de la ciudad automáticamente
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={ciudad}&count=1&language=es&format=json"
     
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, timeout=10.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                current = data.get("current_weather", {})
-                temp = current.get("temperature", "N/D")
-                wind = current.get("windspeed", "N/D")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(geo_url, timeout=10) as resp:
+                if resp.status != 200:
+                    return f"⚠️ No se encontraron coordenadas para {ciudad}."
                 
-                return (
-                    f"🌤️ *CLIMA ACTUAL PARA ENTRENAR*\n"
-                    f"📍 *Rafaela, Santa Fe*\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"🌡️ *Temperatura:* `{temp} °C`\n"
-                    f"💨 *Viento:* `{wind} km/h`\n\n"
-                    f"💡 *Recomendación:* " + (
-                        "Ideal para salir a sumar kms." if temp < 25 else "Hidratate bien por el calor."
-                    )
-                )
-    except Exception as e:
-        logging.error(f"Error obteniendo clima: {e}")
-    
-    return "⚠️ No se pudo obtener la información del clima en este momento."
+                geo_data = await resp.json()
+                results = geo_data.get("results")
+                if not results:
+                    return f"⚠️ No encontré la ubicación '{ciudad}'."
+                
+                lat = results[0]["latitude"]
+                lon = results[0]["longitude"]
+                nombre_ubicacion = results[0].get("name", ciudad)
+                provincia = results[0].get("admin1", "")
 
-# 9. MANEJADOR DE TEXTO CON IA (CONVERSACIONAL Y NATURAL)
-# ----------------------------------------------------------------------
+            # 2. Consultamos el clima con las coordenadas obtenidas
+            weather_url = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={lat}&longitude={lon}"
+                f"&current=temperature_2m,relative_humidity_2m,precipitation,precipitation_probability,wind_speed_10m"
+                f"&timezone=auto"
+            )
+
+            async with session.get(weather_url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    current = data.get("current", {})
+
+                    temp = current.get("temperature_2m", "N/D")
+                    wind = current.get("wind_speed_10m", "N/D")
+                    humidity = current.get("relative_humidity_2m", "N/D")
+                    rain_prob = current.get("precipitation_probability", 0)
+                    precip_mm = current.get("precipitation", 0)
+
+                    # Emoji según lluvia
+                    emoji_lluvia = "🌧️" if rain_prob > 60 else ("🌦️" if rain_prob > 20 else "☀️")
+
+                    ubicacion_str = f"{nombre_ubicacion}, {provincia}" if provincia else nombre_ubicacion
+
+                    return (
+                        f"🌤️ *CONDICIONES PARA ENTRENAR EN {ubicacion_str.upper()}*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"🌡️ *Temperatura:* `{temp}°C` | 💧 *Humedad:* `{humidity}%` \n"
+                        f"💨 *Viento:* `{wind} km/h`\n"
+                        f"{emoji_lluvia} *Prob. de Lluvia:* `{rain_prob}%` (`{precip_mm} mm`)"
+                    )
+    except Exception as e:
+        return f"⚠️ Error consultando el clima: `{e}`"
 # ----------------------------------------------------------------------
 # MANEJADOR DE TEXTO CON BÚSQUEDA HASTA 90 DÍAS
 # ----------------------------------------------------------------------
