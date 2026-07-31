@@ -169,28 +169,35 @@ def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
 
 import datetime
 
+import datetime
+
 async def obtener_dinamicas_biomecanica():
-    # Usamos la zona horaria TZ_AR si la tenés definida, o datetime standard
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(TZ_AR)
     today_str = now.strftime("%Y-%m-%d")
     oldest_str = (now - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
-    # Solicitamos las actividades de los últimos 30 días hasta HOY
+    # Traemos las actividades de los últimos 30 días
     actividades, err = await fetch_intervals_data("activities", {
         "oldest": oldest_str,
         "newest": today_str
     })
 
     if err or not actividades or not isinstance(actividades, list):
-        return "⚠️ No se encontraron actividades registradas en los últimos 30 días en tu perfil de Intervals.icu."
+        return "⚠️ No se encontraron actividades en los últimos 30 días."
 
-    # Tomamos la última actividad de la lista (la más reciente)
-    act = actividades[-1]
+    # ORDENAR POR FECHA: Nos aseguramos de tener de la más vieja a la más reciente
+    actividades_ordenadas = sorted(
+        actividades, 
+        key=lambda x: x.get("start_date_local", "")
+    )
+
+    # Tomamos la ÚLTIMA (que es la más reciente de todas)
+    act = actividades_ordenadas[-1]
 
     nombre = act.get("name", "Entrenamiento")
     fecha = act.get("start_date_local", "")[:10]
     
-    # Cadencia corregida a pasos totales (SPM)
+    # Cadencia corregida a SPM (pasos por minuto)
     cad_raw = act.get("average_cadence")
     if isinstance(cad_raw, (int, float)):
         cad = int(round(cad_raw * 2)) if cad_raw < 100 else int(round(cad_raw))
