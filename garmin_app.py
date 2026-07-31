@@ -168,46 +168,44 @@ def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
 # ----------------------------------------------------------------------
 
 async def obtener_dinamicas_biomecanica():
-    actividades, err = await fetch_intervals_data("activities", {"limit": 3})
+    actividades, err = await fetch_intervals_data("activities", {"limit": 1})
 
     if err or not actividades:
-        return "⚠️ No se encontraron actividades recientes con métricas biomecánicas."
+        return "⚠️ No se encontraron actividades recientes."
 
     act = actividades[0]
     nombre = act.get("name", "Entrenamiento")
     fecha = act.get("start_date_local", "")[:10]
     
-    cadencia_raw = act.get("average_cadence")
-    cadencia = int(round(cadencia_raw)) if isinstance(cadencia_raw, (int, float)) else "N/D"
-    
+    # Cadencia corregida a SPM totales (si viene < 100)
+    cad_raw = act.get("average_cadence")
+    if isinstance(cad_raw, (int, float)):
+        cad = int(round(cad_raw * 2)) if cad_raw < 100 else int(round(cad_raw))
+    else:
+        cad = "N/D"
+        
     stride_len = round(act.get("stride_length", 0), 2) if act.get("stride_length") else "N/D"
-    gct = round(act.get("ground_contact_time", 0), 1) if act.get("ground_contact_time") else "N/D"
-    gct_bal = act.get("ground_contact_balance", "N/D")
-    osc_vert = round(act.get("vertical_oscillation", 0), 1) if act.get("vertical_oscillation") else "N/D"
-    rel_vert = round(act.get("vertical_ratio", 0), 1) if act.get("vertical_ratio") else "N/D"
-
-    vo2max = act.get("icu_vo2max") or act.get("vo2max", "N/D")
-    te_aero = act.get("aerobic_training_effect", "N/D")
-    te_anaero = act.get("anaerobic_training_effect", "N/D")
-    threshold_hr = act.get("threshold_heartrate", "N/D")
+    fc_avg = act.get("average_heartrate", "N/D")
+    speed_ms = act.get("average_speed", 0)
+    
+    # Cálculo aproximado del ritmo min/km
+    pace_str = "N/D"
+    if speed_ms > 0:
+        pace_sec = 1000 / speed_ms
+        m, s = divmod(int(pace_sec), 60)
+        pace_str = f"{m}:{s:02d} min/km"
 
     return (
-        f"🏃‍♂️ *DINÁMICAS DE CARRERA Y BIOMECÁNICA*\n"
+        f"🏃‍♂️ *MÉTRICAS DE CARRERA Y BIOMECÁNICA*\n"
         f"📌 *{nombre.upper()}* (`{fecha}`)\n"
+        f"📱 *Dispositivo:* Garmin Forerunner 55\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🦶 *EFICIENCIA Y PISADA:*\n"
-        f"• 🔄 *Cadencia Media:* `{cadencia} ppm`\n"
+        f"🦶 *EFICIENCIA DE ZANCADA:*\n"
+        f"• 🔄 *Cadencia Media:* `{cad} ppm`\n"
         f"• 📏 *Longitud de Zancada:* `{stride_len} m`\n"
-        f"• ⏱️ *Tiempo Contacto Suelo (GCT):* `{gct} ms`\n"
-        f"• ⚖️ *Equilibrio GCT L/R:* `{gct_bal}`\n\n"
-        f"🦘 *OSCILACIÓN Y RATIO VERTICAL:*\n"
-        f"• ⬆️ *Oscilación Vertical:* `{osc_vert} cm`\n"
-        f"• 📐 *Relación Vertical:* `{rel_vert}%`\n\n"
-        f"⚡ *IMPACTO Y EFECTO DE ENTRENAMIENTO:*\n"
-        f"• 🫁 *Training Effect Aeróbico:* `{te_aero} / 5.0`\n"
-        f"• 💥 *Training Effect Anaeróbico:* `{te_anaero} / 5.0`\n"
-        f"• 🎯 *VO2 Máx Estimado:* `{vo2max} ml/kg/min`\n"
-        f"• 🩸 *Umbral Lactato FC:* `{threshold_hr} ppm`"
+        f"• ⚡ *Ritmo Promedio:* `{pace_str}`\n"
+        f"• ❤️ *FC Media:* `{fc_avg} ppm`\n\n"
+        f"💡 *Nota:* Tu Forerunner 55 registra cadencia y zancada desde la muñeca. Para métricas de contacto con el suelo u oscilación vertical, se requiere una banda HRM-Pro o Pod de Garmin."
     )
 
 async def obtener_salud_sueno():
