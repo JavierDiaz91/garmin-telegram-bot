@@ -612,6 +612,9 @@ async def obtener_clima_actual():
 
 # 9. MANEJADOR DE TEXTO CON IA (CONVERSACIONAL Y NATURAL)
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# MANEJADOR DE TEXTO CON BÚSQUEDA HASTA 90 DÍAS
+# ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_prompt = update.message.text
 
@@ -619,25 +622,26 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ *La IA no está configurada.* Falta `GROQ_API_KEY`.", parse_mode="Markdown")
         return
 
-    thinking_msg = await update.message.reply_text("⚡ *Procesando...*", parse_mode="Markdown")
+    thinking_msg = await update.message.reply_text("⚡ *Buscando en tus registros...*", parse_mode="Markdown")
 
     try:
-        # Recuperamos solo el último entrenamiento/datos para no saturar al modelo de contexto innecesario
-        contexto = await obtener_diagnostico_completo(dias_historia=3)
+        # Carga los últimos 90 días para tener un historial amplio en memoria
+        contexto = await obtener_diagnostico_completo(dias_historia=90)
 
         system_instruction = (
             "Sos el asistente personal de entrenamiento de Javii.\n"
-            "Tu objetivo es ser conciso, directo, conversacional y natural.\n\n"
-            "REGLAS CRÍTICAS DE RESPUESTA:\n"
-            "1. Responde DIRECTAMENTE a lo que Javii te pregunta. Si te hace una pregunta cerrada (ej: '¿Podés leer una foto?'), responde de forma corta, clara y amigable (ej: '¡Sí, Javii! Mandame la captura o foto del entrenamiento y te la analizo al toque.').\n"
-            "2. NO generes análisis largos ni informes de la semana a menos que Javii te pida explícitamente analizar sus datos o su entrenamiento.\n"
-            "3. PROHIBIDO usar caracteres como '##', '###', '==' o '--'. Usa negritas (*texto*) y emojis cuando sea conveniente.\n"
-            "4. Dirigite siempre como Javii."
+            "Tenés acceso a su historial de entrenamientos de los últimos 90 días brindado en el contexto.\n\n"
+            "REGLAS CRÍTICAS:\n"
+            "1. Si Javii te pregunta por una fecha específica (ejemplo: '25-07-2026', '10-07-2026' o 'el 10 de julio'), BUSCÁ esa fecha exacta en el historial del contexto y responde con los km, ritmo, tiempo y FC de ese día.\n"
+            "2. Si en esa fecha exacta NO hubo entrenamiento registrado, decile de forma amigable que ese día no registró actividad o fue día de descanso.\n"
+            "3. Responde de forma clara, directa, conversacional y sin rodeos.\n"
+            "4. NO uses encabezados tipo '##' ni '###'. Usa negritas (*texto*) y viñetas con emojis.\n"
+            "5. Dirigite siempre como Javii."
         )
 
         user_content = (
-            f"DATOS RECIENTES DE CONTEXTO (Usar solo si es relevante a la pregunta):\n{contexto}\n\n"
-            f"MENSAJE DE JAVII: \"{user_prompt}\""
+            f"HISTORIAL DE ENTRENAMIENTOS DE JAVII (ÚLTIMOS 90 DÍAS):\n{contexto}\n\n"
+            f"PREGUNTA O PETICIÓN DE JAVII: \"{user_prompt}\""
         )
 
         chat_completion = groq_client.chat.completions.create(
@@ -646,8 +650,8 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {"role": "user", "content": user_content}
             ],
             model="llama-3.3-70b-versatile",
-            temperature=0.4,
-            max_tokens=600
+            temperature=0.2,
+            max_tokens=800
         )
 
         respuesta_ai = chat_completion.choices[0].message.content
@@ -660,7 +664,6 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"Error generando respuesta con Groq: {e}")
         await thinking_msg.edit_text(f"❌ *Error al procesar:* `{e}`", parse_mode="Markdown", reply_markup=main_menu_keyboard())
-
 # ----------------------------------------------------------------------
 # 10. INICIALIZACIÓN DE TAREAS Y ARRANQUE
 # ----------------------------------------------------------------------
