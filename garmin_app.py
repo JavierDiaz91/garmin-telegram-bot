@@ -326,21 +326,39 @@ async def obtener_carga_trabajo_con_grafico():
     return texto, url_chart
 
 async def obtener_estado_zapatillas():
-    zapas = cargar_zapatillas()
-    lineas = ["👟 *ESTADO Y KILOMETRAJE DE ZAPATILLAS*", "━━━━━━━━━━━━━━━━━━━━━━━\n"]
+    # Consultamos el equipamiento registrado en Intervals.icu
+    gear_data, err = await fetch_intervals_data("gear", {})
 
-    for nombre, info in zapas.items():
-        km = info.get("km", 0)
-        max_km = info.get("max_km", 600)
-        pct = min(100, int((km / max_km) * 100))
-        bar_filled = "█" * (pct // 10)
-        bar_empty = "░" * (10 - (pct // 10))
-        alerta = " ⚠️ *RECAMBIO SUGERIDO*" if pct >= 85 else ""
+    if err or not gear_data:
+        return "⚠️ No se encontró equipamiento registrado en tu cuenta de Intervals.icu."
+
+    # Filtramos solo el calzado (Shoes)
+    zapatillas = [g for g in gear_data if g.get("type") in ["Shoes", "Calzado"]]
+
+    if not zapatillas:
+        return "⚠️ Aún no agregaste calzado en Intervals.icu (Configuración -> Equipamiento)."
+
+    lineas = ["👟 *ESTADO Y KILOMETRAJE DE ZAPATILLAS*\n━━━━━━━━━━━━━━━━━━━━━━━\n"]
+
+    for zap in zapatillas:
+        nombre = zap.get("name", "Zapatilla")
+        dist_km = round(zap.get("distance", 0) / 1000, 1)
+        max_km = zap.get("max_distance", 0) / 1000 if zap.get("max_distance") else 700.0
+        
+        # Porcentaje consumido de vida útil
+        porcentaje = min(int((dist_km / max_km) * 100), 100)
+        
+        # Crear barra de progreso en caracteres [████░░░░░░]
+        bloques = int(porcentaje / 10)
+        barra = "█" * bloques + "░" * (10 - bloques)
+
+        # Alerta visual si están al límite
+        estado_emoji = "📌" if porcentaje < 80 else "⚠️"
 
         lineas.append(
-            f"📌 *{nombre}* ({info.get('modelo', '')})\n"
-            f"  ├ 📏 `{km:.1f} km` / `{max_km:.0f} km` ({pct}%)\n"
-            f"  └ `[{bar_filled}{bar_empty}]`{alerta}\n"
+            f"{estado_emoji} *{nombre}*\n"
+            f" ├ 📏 `{dist_km} km` / `{max_km} km` (`{porcentaje}%`)\n"
+            f" └ `[{barra}]`\n"
         )
 
     return "\n".join(lineas)
