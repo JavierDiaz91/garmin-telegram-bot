@@ -167,19 +167,30 @@ def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
 # 5. FUNCIONES DE MÉTRICAS
 # ----------------------------------------------------------------------
 
+import datetime
+
 async def obtener_dinamicas_biomecanica():
-    # Pedimos la última actividad guardada en Intervals.icu (sin importar la fecha)
-    actividades, err = await fetch_intervals_data("activities", {"limit": 5})
+    # Usamos la zona horaria TZ_AR si la tenés definida, o datetime standard
+    now = datetime.datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    oldest_str = (now - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
-    if err or not actividades:
-        return "⚠️ No se encontraron actividades registradas en tu perfil de Intervals.icu."
+    # Solicitamos las actividades de los últimos 30 días hasta HOY
+    actividades, err = await fetch_intervals_data("activities", {
+        "oldest": oldest_str,
+        "newest": today_str
+    })
 
-    # Tomamos la última actividad registrada
-    act = actividades[0]
+    if err or not actividades or not isinstance(actividades, list):
+        return "⚠️ No se encontraron actividades registradas en los últimos 30 días en tu perfil de Intervals.icu."
+
+    # Tomamos la última actividad de la lista (la más reciente)
+    act = actividades[-1]
+
     nombre = act.get("name", "Entrenamiento")
     fecha = act.get("start_date_local", "")[:10]
     
-    # Cadencia calculada correctamente para pasos totales por minuto (SPM)
+    # Cadencia corregida a pasos totales (SPM)
     cad_raw = act.get("average_cadence")
     if isinstance(cad_raw, (int, float)):
         cad = int(round(cad_raw * 2)) if cad_raw < 100 else int(round(cad_raw))
@@ -188,10 +199,11 @@ async def obtener_dinamicas_biomecanica():
         
     stride_len = round(act.get("stride_length", 0), 2) if act.get("stride_length") else "N/D"
     fc_avg = act.get("average_heartrate", "N/D")
+    fc_max = act.get("max_heartrate", "N/D")
     dist_km = round(act.get("distance", 0) / 1000, 2)
-    speed_ms = act.get("average_speed", 0)
+    moving_time_min = round(act.get("moving_time", 0) / 60, 1)
     
-    # Formatear el ritmo en min/km
+    speed_ms = act.get("average_speed", 0)
     pace_str = "N/D"
     if speed_ms > 0:
         pace_sec = 1000 / speed_ms
@@ -201,13 +213,13 @@ async def obtener_dinamicas_biomecanica():
     return (
         f"🏃‍♂️ *ÚLTIMA CARRERA REGISTRADA*\n"
         f"📌 *{nombre.upper()}* (`{fecha}`)\n"
-        f"📏 *Distancia:* `{dist_km} km` | ⏱️ *Ritmo:* `{pace_str}`\n"
+        f"📏 *Distancia:* `{dist_km} km` | ⏱️ *Tiempo:* `{moving_time_min} min` | ⏱️ *Ritmo:* `{pace_str}`\n"
         f"📱 *Dispositivo:* Garmin Forerunner 55\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🦶 *EFICIENCIA DE ZANCADA:*\n"
+        f"🦶 *EFICIENCIA DE ZANCADA & FC:*\n"
         f"• 🔄 *Cadencia Media:* `{cad} ppm`\n"
         f"• 📏 *Longitud de Zancada:* `{stride_len} m`\n"
-        f"• ❤️ *FC Media:* `{fc_avg} ppm`"
+        f"• ❤️ *FC Media / Máx:* `{fc_avg} ppm` / `{fc_max} ppm`"
     )
 
 async def obtener_salud_sueno():
