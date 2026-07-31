@@ -418,22 +418,50 @@ async def enviar_morning_briefing(context: ContextTypes.DEFAULT_TYPE):
 
     salud = await obtener_salud_sueno()
     clima = await obtener_clima_rafaela()
-    carga, _ = await obtener_carga_trabajo_con_grafico()
+    
+    # CAPTURAMOS LA URL DEL GRÁFICO (en vez de descartarla con _)
+    carga_texto, url_chart = await obtener_carga_trabajo_con_grafico()
 
     texto_briefing = (
         f"🌅 *MORNING BRIEFING - ALTO RENDIMIENTO*\n"
         f"📍 Rafaela, Santa Fe | {clima}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"{salud}\n\n"
-        f"{carga}\n\n"
+        f"{carga_texto}\n\n"
         f"💡 *CONSEJO DEL DÍA:* Revisa tus zonas de FC y mantendé una hidratación adecuada."
     )
 
     try:
-        await context.bot.send_message(chat_id=CHAT_ID, text=texto_briefing, parse_mode="Markdown")
-        logging.info("Morning Briefing enviado con éxito.")
+        # Si tenemos URL del gráfico PMC, mandamos LA FOTO con el texto en el caption
+        if url_chart:
+            await context.bot.send_photo(
+                chat_id=CHAT_ID,
+                photo=url_chart,
+                caption=texto_briefing,
+                parse_mode="Markdown",
+                reply_markup=main_menu_keyboard()
+            )
+            logging.info("Morning Briefing con gráfico enviado con éxito.")
+        else:
+            # Fallback en texto si no hay gráfico
+            await context.bot.send_message(
+                chat_id=CHAT_ID, 
+                text=texto_briefing, 
+                parse_mode="Markdown",
+                reply_markup=main_menu_keyboard()
+            )
+            logging.info("Morning Briefing (solo texto) enviado con éxito.")
+
     except Exception as e:
-        logging.error(f"Error enviando Morning Briefing: {e}")
+        logging.error(f"Error enviando Morning Briefing en Markdown: {e}")
+        # Reintento de seguridad sin Markdown por si algún carácter especial rompió el formato
+        try:
+            if url_chart:
+                await context.bot.send_photo(chat_id=CHAT_ID, photo=url_chart, caption=texto_briefing)
+            else:
+                await context.bot.send_message(chat_id=CHAT_ID, text=texto_briefing)
+        except Exception as ex:
+            logging.error(f"Error crítico en reintento de Morning Briefing: {ex}")
 
 # ----------------------------------------------------------------------
 # 7. MENÚ Y BOTONES INTERACTIVOS
