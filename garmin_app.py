@@ -168,16 +168,18 @@ def generar_url_grafico_pmc(fechas, ctl, atl, tsb):
 # ----------------------------------------------------------------------
 
 async def obtener_dinamicas_biomecanica():
-    actividades, err = await fetch_intervals_data("activities", {"limit": 1})
+    # Pedimos la última actividad guardada en Intervals.icu (sin importar la fecha)
+    actividades, err = await fetch_intervals_data("activities", {"limit": 5})
 
     if err or not actividades:
-        return "⚠️ No se encontraron actividades recientes."
+        return "⚠️ No se encontraron actividades registradas en tu perfil de Intervals.icu."
 
+    # Tomamos la última actividad registrada
     act = actividades[0]
     nombre = act.get("name", "Entrenamiento")
     fecha = act.get("start_date_local", "")[:10]
     
-    # Cadencia corregida a SPM totales (si viene < 100)
+    # Cadencia calculada correctamente para pasos totales por minuto (SPM)
     cad_raw = act.get("average_cadence")
     if isinstance(cad_raw, (int, float)):
         cad = int(round(cad_raw * 2)) if cad_raw < 100 else int(round(cad_raw))
@@ -186,9 +188,10 @@ async def obtener_dinamicas_biomecanica():
         
     stride_len = round(act.get("stride_length", 0), 2) if act.get("stride_length") else "N/D"
     fc_avg = act.get("average_heartrate", "N/D")
+    dist_km = round(act.get("distance", 0) / 1000, 2)
     speed_ms = act.get("average_speed", 0)
     
-    # Cálculo aproximado del ritmo min/km
+    # Formatear el ritmo en min/km
     pace_str = "N/D"
     if speed_ms > 0:
         pace_sec = 1000 / speed_ms
@@ -196,16 +199,15 @@ async def obtener_dinamicas_biomecanica():
         pace_str = f"{m}:{s:02d} min/km"
 
     return (
-        f"🏃‍♂️ *MÉTRICAS DE CARRERA Y BIOMECÁNICA*\n"
+        f"🏃‍♂️ *ÚLTIMA CARRERA REGISTRADA*\n"
         f"📌 *{nombre.upper()}* (`{fecha}`)\n"
+        f"📏 *Distancia:* `{dist_km} km` | ⏱️ *Ritmo:* `{pace_str}`\n"
         f"📱 *Dispositivo:* Garmin Forerunner 55\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🦶 *EFICIENCIA DE ZANCADA:*\n"
         f"• 🔄 *Cadencia Media:* `{cad} ppm`\n"
         f"• 📏 *Longitud de Zancada:* `{stride_len} m`\n"
-        f"• ⚡ *Ritmo Promedio:* `{pace_str}`\n"
-        f"• ❤️ *FC Media:* `{fc_avg} ppm`\n\n"
-        f"💡 *Nota:* Tu Forerunner 55 registra cadencia y zancada desde la muñeca. Para métricas de contacto con el suelo u oscilación vertical, se requiere una banda HRM-Pro o Pod de Garmin."
+        f"• ❤️ *FC Media:* `{fc_avg} ppm`"
     )
 
 async def obtener_salud_sueno():
