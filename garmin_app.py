@@ -288,14 +288,18 @@ async def obtener_carga_trabajo_con_grafico():
     url_chart = generar_url_grafico_pmc(fechas, ctl_list, atl_list, tsb_list) if fechas else None
 
     texto = (
-        f"📈 *ESTADO DE CARGA Y FORMA (CTL / ATL / TSB)*\n"
+        f"📈 *ESTADO DE CARGA Y FORMA (PMC)*\n"
         f"📅 Fecha: `{today_str}`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🛡️ *Fitness (CTL):* `{ctl_actual}` _(Últimos 42 días)_\n"
-        f"🔥 *Fatiga (ATL):* `{atl_actual}` _(Últimos 7 días)_\n"
-        f"⚖️ *Forma / TSB:* `{tsb_actual}`\n\n"
+        f"🛡️ *Fitness (CTL):* `{ctl_actual}`\n"
+        f"🔥 *Fatiga (ATL):* `{atl_actual}`\n"
+        f"⚖️ *Forma (TSB):* `{tsb_actual}`\n\n"
         f"🎯 *DIAGNÓSTICO RÁPIDO:*\n"
-        f"└ {estado_tsb}"
+        f"└ {estado_tsb}\n\n"
+        f"📌 *¿CÓMO LEER EL GRÁFICO?*\n"
+        f"• 🔷 *Línea Azul (CTL - Fitness):* Acumulación de carga a largo plazo (42 días). Cuanto más alta, mayor es tu base física.\n"
+        f"• 🟧 *Línea Naranja (ATL - Fatiga):* Carga a corto plazo (últimos 7 días). Sube rápido cuando entrenás duro.\n"
+        f"• 🟢 *Línea Verde (TSB - Forma):* Tu frescura actual (CTL - ATL). Si está muy negativa estás cansado; si está positiva, estás descansado y listo para competir."
     )
 
     return texto, url_chart
