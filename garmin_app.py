@@ -11,6 +11,7 @@ from flask import Flask
 from groq import Groq
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -344,13 +345,17 @@ async def obtener_historial_actividades(dias: int = 7):
         fc_avg = act.get("average_heartrate", "N/D")
         
         cad_raw = act.get("average_cadence")
-        cad = int(round(cad_raw)) if isinstance(cad_raw, (int, float)) else "N/D"
+        if isinstance(cad_raw, (int, float)):
+            # Si Intervals manda cadencia de 1 sola pierna (<100), la duplicamos a SPM totales
+            cad = int(round(cad_raw * 2)) if cad_raw < 100 else int(round(cad_raw))
+        else:
+            cad = "N/D"
         
         stride = round(act.get("stride_length", 0), 2) if act.get("stride_length") else "N/D"
 
         resumen.append(
             f"📅 *{fecha}* ➔ *{nombre}*\n"
-            f"  └ 📏 `{dist} km` | ⏱️ `{dur} min` | ⚡ `TSS {tss}`\n"
+            f"  ├ 📏 `{dist} km` | ⏱️ `{dur} min` | ⚡ `TSS {tss}`\n"
             f"  └ ❤️ `FC {fc_avg} ppm` | 🔄 `Cad {cad} ppm` | 🦶 `Zancada {stride} m`"
         )
 
@@ -416,26 +421,30 @@ async def enviar_morning_briefing(context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 def main_menu_keyboard():
     keyboard = [
-        [InlineKeyboardButton("⚡ DIAGNÓSTICO INTEGRAL Y IA", callback_data="diagnostico_completo")],
         [
-            InlineKeyboardButton("🏃 Entreno Hoy", callback_data="entrenamiento_hoy"),
-            InlineKeyboardButton("🦶 Biomecánica & Cadencia", callback_data="biomecanica")
+            InlineKeyboardButton("🏃 Entreno Hoy", callback_data="btn_entreno_hoy"),
+            InlineKeyboardButton("📈 PMC & Carga", callback_data="btn_pmc")
         ],
         [
-            InlineKeyboardButton("📈 Carga & Gráfico PMC", callback_data="carga"),
-            InlineKeyboardButton("🫀 Sueño & HRV", callback_data="salud_sueno")
+            InlineKeyboardButton("🦶 Biomecánica", callback_data="btn_biomecanica"),
+            InlineKeyboardButton("🩺 Sueño & HRV", callback_data="btn_sueno_hrv")
         ],
-        [InlineKeyboardButton("👟 Kilometraje Zapatillas", callback_data="zapatillas")],
-        [InlineKeyboardButton("🏠 Menú Principal", callback_data="menu_principal")]
+        [
+            InlineKeyboardButton("👟 Zapatillas", callback_data="btn_zapatillas"),
+            InlineKeyboardButton("🌤️ Clima Entreno", callback_data="btn_clima")
+        ],
+        [
+            InlineKeyboardButton("⚡ Diagnóstico", callback_data="btn_diagnostico_ia")
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "🚀 *¡HOLA JAVII! CENTRO DE ALTO RENDIMIENTO DEPORTIVO*\n"
+        "🚀 *¡HOLA JAVII! QUE NECESITAS SABER HOY?*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "• Tocá cualquier botón para consultar métricas o ver tu gráfico PMC.\n"
-        "• Mandame una *foto o captura* de tu entrenamiento para verla con Visión por IA.\n"
+        "• Mandame una *foto o captura* de tu entrenamiento para analizarla profundamente.\n"
         "• O escribime en texto libre tu consulta."
     )
     await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=main_menu_keyboard())
@@ -473,6 +482,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🔍 *Verificando desgaste de calzado...*", parse_mode="Markdown")
         res = await obtener_estado_zapatillas()
         await query.edit_message_text(res, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+
+    elif data == "clima":
+        await query.edit_message_text("🔍 *Consultando clima actual de Rafaela...*", parse_mode="Markdown")
+        res = await obtener_clima_rafaela()
+        texto_clima = f"🌤️ *CONDICIONES PARA ENTRENAR EN RAFAELA*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n{res}"
+        await query.edit_message_text(texto_clima, parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
     elif data == "entrenamiento_hoy":
         await query.edit_message_text("🔍 *Buscando entrenamientos de hoy...*", parse_mode="Markdown")
@@ -532,7 +547,7 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ],
-            model="llama-3.2-11b-vision-preview",
+            model="llama-3.2-90b-vision-preview",
             temperature=0.2,
             max_tokens=1000
         )
@@ -544,10 +559,35 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Error procesando imagen: {e}")
         await thinking_msg.edit_text(f"❌ *Error al analizar la imagen:* `{e}`", parse_mode="Markdown", reply_markup=main_menu_keyboard())
 
-# ----------------------------------------------------------------------
-# 9. MANEJADOR DE TEXTO CON IA
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
+
+async def obtener_clima_actual():
+    # Coordenadas de Rafaela, Santa Fe (-31.25, -61.48)
+    url = "https://api.open-meteo.com/v1/forecast?latitude=-31.25&longitude=-61.48&current_weather=true&hourly=relativehumidity_2m"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=10.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                current = data.get("current_weather", {})
+                temp = current.get("temperature", "N/D")
+                wind = current.get("windspeed", "N/D")
+                
+                return (
+                    f"🌤️ *CLIMA ACTUAL PARA ENTRENAR*\n"
+                    f"📍 *Rafaela, Santa Fe*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"🌡️ *Temperatura:* `{temp} °C`\n"
+                    f"💨 *Viento:* `{wind} km/h`\n\n"
+                    f"💡 *Recomendación:* " + (
+                        "Ideal para salir a sumar kms." if temp < 25 else "Hidratate bien por el calor."
+                    )
+                )
+    except Exception as e:
+        logging.error(f"Error obteniendo clima: {e}")
+    
+    return "⚠️ No se pudo obtener la información del clima en este momento."
+
 # 9. MANEJADOR DE TEXTO CON IA (CONVERSACIONAL Y NATURAL)
 # ----------------------------------------------------------------------
 async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
