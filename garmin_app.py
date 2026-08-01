@@ -763,21 +763,62 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 # 10. INICIALIZACIÓN DE TAREAS Y ARRANQUE
 # ----------------------------------------------------------------------
-import zoneinfo
 
 # En tu función post_init:
 async def post_init(application):
+    """Inicializa la tarea programada una vez que la app levantó correctamente."""
+    tz_ar = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
+    
     if CHAT_ID:
-        # Usamos ZoneInfo directamente (sin importar pytz)
-        tz_ar = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
-        scheduler = AsyncIOScheduler(timezone=tz_ar)
-        
-        scheduler.add_job(
-            enviar_morning_briefing,
-            trigger="cron",
-            hour=7,
-            minute=30,
-            args=[application]
-        )
-        scheduler.start()
-        logging.info("Planificador Morning Briefing activo (07:30 AM AR).")
+        try:
+            scheduler = AsyncIOScheduler(timezone=tz_ar)
+            scheduler.add_job(
+                enviar_morning_briefing,
+                trigger="cron",
+                hour=7,
+                minute=30,
+                args=[application]
+            )
+            scheduler.start()
+            logging.info("⏰ Morning Briefing programado a las 07:30 AM (Hora Argentina).")
+        except Exception as e:
+            logging.error(f"❌ Error al iniciar el scheduler: {e}")
+    else:
+        logging.warning("⚠️ No se pudo programar el Morning Briefing: Falta CHAT_ID.")
+
+
+# ----------------------------------------------------------------------
+# SERVIDOR WEB Y ARRANQUE (Al final del archivo)
+# ----------------------------------------------------------------------
+def run_web_server():
+    """Servidor HTTP para Render."""
+    port = int(os.environ.get("PORT", 8080))
+    flask_app = Flask(__name__)
+
+    @flask_app.route("/")
+    def home():
+        return "Bot activo", 200
+
+    flask_app.run(host="0.0.0.0", port=port)
+
+
+if __name__ == "__main__":
+    if not BOT_TOKEN:
+        logging.error("❌ Error fatal: BOT_TOKEN no definido.")
+        exit(1)
+
+    # 1. Iniciar servidor Flask en segundo plano
+    threading.Thread(target=run_web_server, daemon=True).start()
+
+    # 2. Construir la aplicación (Acá ya reconoce post_init)
+    telegram_app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+
+    # 3. Handlers
+    telegram_app.add_handler(CommandHandler("start", start_command))
+    telegram_app.add_handler(CallbackQueryHandler(button_handler))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_user_photo))
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_text))
+
+    # 4. Iniciar Polling
+    logging.info("🚀 Iniciando polling del bot...")
+    telegram_app.run_polling()
