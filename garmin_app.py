@@ -316,7 +316,7 @@ async def obtener_carga_trabajo_con_grafico():
         f"🔥 *Fatiga (ATL):* `{atl_actual}` _(Carga 7 días - Estrés reciente)_\n"
         f"⚖️ *Forma (TSB):* `{tsb_actual}`\n\n"
         f"🎯 *DIAGNÓSTICO RÁPIDO:*\n"
-        f"└ {estado_tsb}\n\n"
+        f"{estado_tsb}\n\n"
         f"📊 *GUÍA DE VALORES Y RANGOS (TSB):*\n"
         f"• `> +10`: 🚀 *Frescura Máxima* (Ideal pre-carrera)\n"
         f"• `-10 a +10`: ⚖️ *Zona Neutra* (Mantenimiento / Rodajes)\n"
