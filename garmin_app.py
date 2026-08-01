@@ -1,7 +1,6 @@
 import datetime
 import pytz
 import _zoneinfo
-import zoneinfo
 import os
 import logging
 import threading

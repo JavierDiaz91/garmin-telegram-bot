@@ -4,4 +4,4 @@ httpx
 flask
 gunicorn
 aiohttp
-pip freeze > requirements.txt
+pytz
