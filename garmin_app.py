@@ -1,6 +1,6 @@
 import datetime
 import pytz
-import _zoneinfo
+import zoneinfo
 import os
 import logging
 import threading
@@ -38,7 +38,7 @@ ATHLETE_ID = os.getenv("ATHLETE_ID")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 CHAT_ID = os.getenv("CHAT_ID") or os.getenv("MY_CHAT_ID")
 
-TZ_AR = zoneinfo.ZoneInfo("America/Argentina/Buenos_Aires")
+TZ_AR = pytz.timezone("America/Argentina/Buenos_Aires")
 
 groq_client = None
 if GROQ_API_KEY:
