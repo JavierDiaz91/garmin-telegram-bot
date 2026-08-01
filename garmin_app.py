@@ -1,4 +1,5 @@
 import datetime
+import pytz
 import zoneinfo
 import os
 import logging
@@ -764,30 +765,49 @@ async def handle_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------
 async def post_init(application):
     """Inicializa la tarea programada una vez que la app levantó correctamente."""
+    
+    # 1. Aseguramos la zona horaria usando pytz
+    tz_ar = pytz.timezone("America/Argentina/Buenos_Aires")
+    
     if CHAT_ID:
-        scheduler = AsyncIOScheduler(timezone="America/Argentina/Buenos_Aires")
-        scheduler.add_job(
-            enviar_morning_briefing,
-            trigger="cron",
-            hour=7,
-            minute=30,
-            args=[application]
-        )
-        scheduler.start()
-        logging.info("Planificador Morning Briefing activo (07:30 AM AR).")
+        try:
+            scheduler = AsyncIOScheduler(timezone=tz_ar)
+            
+            scheduler.add_job(
+                enviar_morning_briefing,
+                trigger="cron",
+                hour=7,
+                minute=30,
+                args=[application]
+            )
+            
+            scheduler.start()
+            logging.info(f"✅ Planificador Morning Briefing activo para las 07:30 AM (AR).")
+            # Log adicional para debug:
+            logging.info(f"Jobs programados actualmente: {scheduler.get_jobs()}")
+            
+        except Exception as e:
+            logging.error(f"❌ Error al iniciar el planificador: {e}")
+    else:
+        logging.warning("⚠️ No se pudo programar el Morning Briefing: Falta CHAT_ID.")
 
 if __name__ == "__main__":
     if not BOT_TOKEN:
         raise ValueError("Error: Falta BOT_TOKEN.")
 
+    # Iniciar servidor web (para que Render no detecte inactividad)
     threading.Thread(target=run_web_server, daemon=True).start()
 
+    # Construcción de la App
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
+    # Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, handle_user_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_text))
 
-    logging.info("Bot de Rendimiento en ejecución...")
+    logging.info("🚀 Bot de Rendimiento en ejecución...")
+    
+    # Ejecución
     app.run_polling()
