@@ -656,14 +656,21 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
+    # Definimos un User-Agent único para evitar que Open-Meteo nos aplique rate-limit (Error 429)
+    headers = {
+        "User-Agent": "GarminTelegramBot/1.0 (contacto@tuapp.com)"
+    }
+    
     geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={ciudad}&count=1&language=es&format=json"
     
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=headers) as session:
             # 1. Buscamos coordenadas
             async with session.get(geo_url, timeout=10) as resp:
-                if resp.status != 200:
-                    return f"⚠️ No se pudo obtener la ubicación para {ciudad}."
+                if resp.status == 429:
+                    return "⚠️ La API de clima alcanzó el límite de peticiones por minuto (Error 429). Aguardá unos instantes."
+                elif resp.status != 200:
+                    return f"⚠️ No se pudo obtener la ubicación para {ciudad} (Código: {resp.status})."
                 
                 geo_data = await resp.json()
                 results = geo_data.get("results")
@@ -675,7 +682,7 @@ async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
                 nombre_ubicacion = results[0].get("name", ciudad)
                 provincia = results[0].get("admin1", "")
 
-            # 2. Consultamos clima (usando precipitation en lugar de precipitation_probability en current)
+            # 2. Consultamos clima
             weather_url = (
                 f"https://api.open-meteo.com/v1/forecast?"
                 f"latitude={lat}&longitude={lon}"
@@ -693,7 +700,6 @@ async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
                     humidity = current.get("relative_humidity_2m", "N/D")
                     precip_mm = current.get("precipitation", 0)
 
-                    # Determinar si está lloviendo o no según precip_mm
                     if precip_mm > 1.0:
                         emoji_clima = "🌧️ Lloviendo"
                     elif precip_mm > 0.0:
@@ -710,6 +716,8 @@ async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
                         f"💨 *Viento:* `{wind} km/h`\n"
                         f"🌧️ *Precipitaciones actuales:* `{precip_mm} mm` ({emoji_clima})"
                     )
+                elif resp.status == 429:
+                    return "⚠️ Límite de peticiones de clima superado (Error 429). Esperá unos segundos y reintentá."
                 else:
                     return f"⚠️ Error en la respuesta del clima (Código: {resp.status})"
 
