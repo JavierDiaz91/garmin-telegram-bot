@@ -656,40 +656,23 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
-    # Definimos un User-Agent único para evitar que Open-Meteo nos aplique rate-limit (Error 429)
+    # Coordenadas fijas de Rafaela, Santa Fe
+    LAT_RAFAELA = -31.2503
+    LON_RAFAELA = -60.4883
+
     headers = {
         "User-Agent": "GarminTelegramBot/1.0 (contacto@tuapp.com)"
     }
-    
-    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={ciudad}&count=1&language=es&format=json"
-    
+
+    weather_url = (
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={LAT_RAFAELA}&longitude={LON_RAFAELA}"
+        f"&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m"
+        f"&timezone=America%2FArgentina%2FBuenos_Aires"
+    )
+
     try:
         async with aiohttp.ClientSession(headers=headers) as session:
-            # 1. Buscamos coordenadas
-            async with session.get(geo_url, timeout=10) as resp:
-                if resp.status == 429:
-                    return "⚠️ La API de clima alcanzó el límite de peticiones por minuto (Error 429). Aguardá unos instantes."
-                elif resp.status != 200:
-                    return f"⚠️ No se pudo obtener la ubicación para {ciudad} (Código: {resp.status})."
-                
-                geo_data = await resp.json()
-                results = geo_data.get("results")
-                if not results:
-                    return f"⚠️ No encontré la ubicación '{ciudad}'."
-                
-                lat = results[0]["latitude"]
-                lon = results[0]["longitude"]
-                nombre_ubicacion = results[0].get("name", ciudad)
-                provincia = results[0].get("admin1", "")
-
-            # 2. Consultamos clima
-            weather_url = (
-                f"https://api.open-meteo.com/v1/forecast?"
-                f"latitude={lat}&longitude={lon}"
-                f"&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m"
-                f"&timezone=auto"
-            )
-
             async with session.get(weather_url, timeout=10) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -707,17 +690,15 @@ async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
                     else:
                         emoji_clima = "☀️ Despejado / Sin lluvias"
 
-                    ubicacion_str = f"{nombre_ubicacion}, {provincia}" if provincia else nombre_ubicacion
-
                     return (
-                        f"🌤️ *CONDICIONES PARA ENTRENAR EN {ubicacion_str.upper()}*\n"
+                        f"🌤️ *CONDICIONES PARA ENTRENAR EN RAFAELA*\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                         f"🌡️ *Temperatura:* `{temp}°C` | 💧 *Humedad:* `{humidity}%` \n"
                         f"💨 *Viento:* `{wind} km/h`\n"
                         f"🌧️ *Precipitaciones actuales:* `{precip_mm} mm` ({emoji_clima})"
                     )
                 elif resp.status == 429:
-                    return "⚠️ Límite de peticiones de clima superado (Error 429). Esperá unos segundos y reintentá."
+                    return "⚠️ La API gratuita de clima está limitada temporalmente por la IP de Render. Reintentá en un minuto."
                 else:
                     return f"⚠️ Error en la respuesta del clima (Código: {resp.status})"
 
