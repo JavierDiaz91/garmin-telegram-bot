@@ -656,52 +656,33 @@ async def handle_user_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def obtener_clima_ciudad(ciudad: str = "Rafaela"):
-    # Coordenadas fijas de Rafaela, Santa Fe
-    LAT_RAFAELA = -31.2503
-    LON_RAFAELA = -60.4883
+    api_key = os.environ.get("WEATHER_API_KEY")
+    if not api_key:
+        return "⚠️ Falta configurar la variable de entorno WEATHER_API_KEY en Render."
 
-    headers = {
-        "User-Agent": "GarminTelegramBot/1.0 (contacto@tuapp.com)"
-    }
-
-    weather_url = (
-        f"https://api.open-meteo.com/v1/forecast?"
-        f"latitude={LAT_RAFAELA}&longitude={LON_RAFAELA}"
-        f"&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m"
-        f"&timezone=America%2FArgentina%2FBuenos_Aires"
-    )
+    url = f"http://api.weatherapi.com/v1/current.json?key={api_key}&q={ciudad}&lang=es"
 
     try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(weather_url, timeout=10) as resp:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     current = data.get("current", {})
 
-                    temp = current.get("temperature_2m", "N/D")
-                    wind = current.get("wind_speed_10m", "N/D")
-                    humidity = current.get("relative_humidity_2m", "N/D")
-                    precip_mm = current.get("precipitation", 0)
-
-                    if precip_mm > 1.0:
-                        emoji_clima = "🌧️ Lloviendo"
-                    elif precip_mm > 0.0:
-                        emoji_clima = "🌦️ Llovizna ligera"
-                    else:
-                        emoji_clima = "☀️ Despejado / Sin lluvias"
+                    temp = current.get("temp_c", "N/D")
+                    humidity = current.get("humidity", "N/D")
+                    wind = current.get("wind_kph", "N/D")
+                    precip_mm = current.get("precip_mm", 0)
 
                     return (
                         f"🌤️ *CONDICIONES PARA ENTRENAR EN RAFAELA*\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                         f"🌡️ *Temperatura:* `{temp}°C` | 💧 *Humedad:* `{humidity}%` \n"
                         f"💨 *Viento:* `{wind} km/h`\n"
-                        f"🌧️ *Precipitaciones actuales:* `{precip_mm} mm` ({emoji_clima})"
+                        f"🌧️ *Precipitaciones:* `{precip_mm} mm`"
                     )
-                elif resp.status == 429:
-                    return "⚠️ La API gratuita de clima está limitada temporalmente por la IP de Render. Reintentá en un minuto."
                 else:
-                    return f"⚠️ Error en la respuesta del clima (Código: {resp.status})"
-
+                    return f"⚠️ Error consultando WeatherAPI (Código: {resp.status})"
     except Exception as e:
         return f"⚠️ Error consultando el clima: `{e}`"
 # ----------------------------------------------------------------------
